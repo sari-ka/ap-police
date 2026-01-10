@@ -177,7 +177,7 @@ const DoctorDiagnosisForm = () => {
       Tests: formData.Tests.map(t => ({
         Test_ID: t.Test_ID || null,
         Test_Name: t.Test_Name,
-        Result_Value: t.Result_Value,
+        Result_Value: t.Result_Value ?? "PENDING",
         Reference_Range: t.Reference_Range || "",
         Units: t.Units || "",
         Remarks: t.Remarks || ""
@@ -188,52 +188,82 @@ const DoctorDiagnosisForm = () => {
     console.log("Submitting payload:", payload);
 
     try {
-      await axios.post(`http://localhost:${BACKEND_PORT_NO}/api/medical-actions`, {
-        employee_id: formData.Employee_ID,
-        visit_id: visitId,
-        action_type: "DOCTOR_DIAGNOSIS",
-        source: "DOCTOR",
-        data: {
-          IsFamilyMember: formData.IsFamilyMember,
-          FamilyMember_ID: formData.IsFamilyMember
-            ? formData.FamilyMember_ID
-            : null,
-          tests: payload.Tests,
-          notes: payload.Diagnosis_Notes
-        }
-      });
-
-      alert("✅ Diagnosis record saved successfully!");
-      
-      // Reset form (keep institute ID)
-      setFormData(prev => ({
-        ...prev,
-        Employee_ID: "",
-        Tests: [{
-          Test_ID: "",
-          Test_Name: "",
-          Result_Value: null,
-          Reference_Range: "",
-          Units: ""
-        }],
-        Diagnosis_Notes: ""
-      }));
-      setVisitId(null);
-
-      setSearchTerm("");
-      setFamilyMembers([]);
-    } catch (err) {
-      console.error("Error saving diagnosis:", err?.response?.data || err);
-      alert("❌ Error saving diagnosis: " + (err?.response?.data?.message || err?.message || "Server error"));
+  // 1️⃣ SAVE DIAGNOSIS RECORD (THIS WAS MISSING)
+  await axios.post(
+    `http://localhost:${BACKEND_PORT_NO}/diagnosis-api/add`,
+    {
+      Institute_ID: formData.Institute_ID,
+      Employee_ID: formData.Employee_ID,
+      IsFamilyMember: formData.IsFamilyMember,
+      FamilyMember_ID: formData.IsFamilyMember
+        ? formData.FamilyMember_ID
+        : null,
+      Tests: payload.Tests,
+      Diagnosis_Notes: payload.Diagnosis_Notes,
+      visit_id: visitId
     }
+  );
+
+  // 2️⃣ LOG MEDICAL ACTION (THIS YOU ALREADY HAD)
+  await axios.post(
+    `http://localhost:${BACKEND_PORT_NO}/api/medical-actions`,
+    {
+      employee_id: formData.Employee_ID,
+      visit_id: visitId,
+      action_type: "DOCTOR_DIAGNOSIS",
+      source: "DOCTOR",
+      data: payload
+    }
+  );
+
+  alert("✅ Diagnosis record saved successfully!");
+
+  // Reset form
+  setFormData(prev => ({
+    ...prev,
+    Employee_ID: "",
+    Tests: [{
+      Test_ID: "",
+      Test_Name: "",
+      Result_Value: null,
+      Reference_Range: "",
+      Units: ""
+    }],
+    Diagnosis_Notes: ""
+  }));
+
+  setVisitId(null);
+  setSearchTerm("");
+
+} catch (err) {
+  console.error("Error saving diagnosis:", err?.response?.data || err);
+  alert(
+    "❌ Error saving diagnosis: " +
+    (err?.response?.data?.message || err?.message || "Server error")
+  );
+}
   };
 
-  const fetchVisitDetails = async (visitId) => {
-  const res = await axios.get(
-    `http://localhost:${BACKEND_PORT_NO}/visit-api/visit/${visitId}`
-  );
-  return res.data;
+const fetchVisitDetails = async (visitId) => {
+  if (!visitId) {
+    console.warn("No visitId provided");
+    return null;
+  }
+
+  try {
+    const res = await axios.get(
+      `http://localhost:${BACKEND_PORT_NO}/diagnosis-api/visit/${visitId}`
+    );
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 404) {
+      console.warn("Visit not found:", visitId);
+      return null;
+    }
+    throw err;
+  }
 };
+
 
 
   return (
@@ -268,17 +298,25 @@ const DoctorDiagnosisForm = () => {
         {/* Employee Search */}
         <PatientSelector
           onSelect={async ({ employee, visit_id }) => {
-            setVisitId(visit_id);
+  console.log("Selected visit_id:", visit_id);
 
-            const visit = await fetchVisitDetails(visit_id);
+  setVisitId(visit_id);
 
-            setFormData(prev => ({
-              ...prev,
-              Employee_ID: employee._id,
-              IsFamilyMember: Boolean(visit?.IsFamilyMember),
-              FamilyMember_ID: visit?.FamilyMember_ID || ""
-            }));
-          }}
+const visit = await fetchVisitDetails(visit_id);
+
+setFormData(prev => ({
+  ...prev,
+  Employee_ID: employee._id,
+  IsFamilyMember: Boolean(visit && visit.IsFamilyMember),
+  FamilyMember_ID: visit?.FamilyMember_ID || ""
+}));
+
+if (!visit) {
+  console.warn("Proceeding without visit context");
+}
+
+}}
+
         />
         {formData.IsFamilyMember && (
           <div

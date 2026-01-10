@@ -9,6 +9,27 @@ const Employee = require("../models/employee");
 const FamilyMember = require("../models/family_member");
 const MedicalAction = require("../models/medical_action");
 
+
+const Visit = require("../models/daily_visit");
+
+diagnosisApp.get("/visit/:id", async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({ message: "Invalid visit ID" });
+  }
+
+  const visit = await Visit.findById(req.params.id);
+
+  if (!visit) {
+    return res.status(404).json({ message: "Visit not found" });
+  }
+
+  res.json(visit);
+});
+
+
+
+
+
 // ✅ GET master test list
 diagnosisApp.get("/tests", async (req, res) => {
   try {
@@ -81,6 +102,14 @@ diagnosisApp.post("/add", async (req, res) => {
         });
       });
     }
+    console.log("Saving diagnosis for:", {
+  Institute_ID,
+  Employee_ID,
+  IsFamilyMember,
+  FamilyMember_ID,
+  Tests,
+  Diagnosis_Notes
+});
 
     await record.save();
     // ===================================================
@@ -120,6 +149,8 @@ diagnosisApp.post("/add", async (req, res) => {
     console.error("Diagnosis add error:", err);
     return res.status(500).json({ error: "Failed to save diagnosis", details: err.message });
   }
+
+  
 });
 
 // ✅ Get all diagnosis records for a person
