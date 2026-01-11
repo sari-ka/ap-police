@@ -7,33 +7,36 @@ const Diseases = () => {
   const [filteredEmployees, setFilteredEmployees] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [instituteName, setInstituteName] = useState("");
+  const [diseaseTypes, setDiseaseTypes] = useState([]);
+  const [selectedDiseaseOption, setSelectedDiseaseOption] = useState("");
 
-  // Predefined disease lists by category
-  const communicableDiseases = [
-    "Tuberculosis",
-    "Malaria",
-    "Dengue",
-    "COVID-19",
-    "Cholera",
-    "Typhoid",
-    "Hepatitis A",
-    "Hepatitis B",
-    "Influenza",
-    "Chickenpox",
-  ];
 
-  const nonCommunicableDiseases = [
-    "Diabetes",
-    "Hypertension",
-    "Asthma",
-    "Cancer",
-    "Heart Disease",
-    "Arthritis",
-    "Kidney Disease",
-    "Migraine",
-    "Obesity",
-    "Stroke",
-  ];
+  // // Predefined disease lists by category
+  // const communicableDiseases = [
+  //   "Tuberculosis",
+  //   "Malaria",
+  //   "Dengue",
+  //   "COVID-19",
+  //   "Cholera",
+  //   "Typhoid",
+  //   "Hepatitis A",
+  //   "Hepatitis B",
+  //   "Influenza",
+  //   "Chickenpox",
+  // ];
+
+  // const nonCommunicableDiseases = [
+  //   "Diabetes",
+  //   "Hypertension",
+  //   "Asthma",
+  //   "Cancer",
+  //   "Heart Disease",
+  //   "Arthritis",
+  //   "Kidney Disease",
+  //   "Migraine",
+  //   "Obesity",
+  //   "Stroke",
+  // ];
 
   const [showOtherDiseaseInput, setShowOtherDiseaseInput] = useState(false);
 
@@ -74,6 +77,11 @@ const Diseases = () => {
 
   return `${day}-${month}-${year}`; // ✅ DD-MM-YYYY
 };
+
+ useEffect(() => {
+    fetchDiseaseTypes(formData.Category);
+  }, [formData.Category]);
+
   const fetchInstituteName = async (id) => {
     try {
       const res = await axios.get(
@@ -84,6 +92,23 @@ const Diseases = () => {
       console.error("Error fetching institute name:", err);
     }
   };
+  const addDiseaseType = async (category, diseaseName) => {
+  try {
+    await axios.post(
+      `http://localhost:${BACKEND_PORT_NO}/disease-api/store_type`,
+      {
+        Category: category,
+        Disease_Name: diseaseName,
+      }
+    );
+  } catch (err) {
+    // Ignore duplicate error (409) – disease already exists
+    if (err.response?.status !== 409) {
+      console.error("Failed to add disease type:", err);
+    }
+  }
+};
+
 
   const fetchEmployees = async () => {
     try {
@@ -105,6 +130,18 @@ const Diseases = () => {
       }
     }
   };
+  const fetchDiseaseTypes = async (category) => {
+  try {
+    const res = await axios.get(
+      `http://localhost:${BACKEND_PORT_NO}/disease-api/fetchtype`,
+      { params: { category } }
+    );
+    setDiseaseTypes(res.data || []);
+  } catch (err) {
+    console.error("Disease type fetch error:", err);
+  }
+};
+
 
   // Filter employee by ABS_NO
   useEffect(() => {
@@ -119,6 +156,7 @@ const Diseases = () => {
       setFilteredEmployees(filtered);
     }
   }, [searchTerm, employees]);
+  
 
   // Fetch family members when employee changes - FIXED
   useEffect(() => {
@@ -197,91 +235,108 @@ const Diseases = () => {
     }));
   };
 
-  // Handle category change
-  const handleCategoryChange = (e) => {
-    const selectedCategory = e.target.value;
-    setFormData((prev) => ({
-      ...prev,
-      Category: selectedCategory,
-      Disease_Name: "", // reset disease name
-    }));
-    setShowOtherDiseaseInput(false);
-  };
+ const handleCategoryChange = (e) => {
+  const selectedCategory = e.target.value;
+
+  setFormData((prev) => ({
+    ...prev,
+    Category: selectedCategory,
+    Disease_Name: "",
+  }));
+
+  setSelectedDiseaseOption("");   // 🔴 IMPORTANT
+  setShowOtherDiseaseInput(false);
+};
+
 
   // Handle disease name selection (includes 'Other' logic)
-  const handleDiseaseNameChange = (e) => {
-    const selectedDisease = e.target.value;
-    if (selectedDisease === "Other") {
-      setShowOtherDiseaseInput(true);
-      setFormData((prev) => ({ ...prev, Disease_Name: "" }));
-    } else {
-      setShowOtherDiseaseInput(false);
-      setFormData((prev) => ({ ...prev, Disease_Name: selectedDisease }));
-    }
+ const handleDiseaseNameChange = (e) => {
+  const value = e.target.value;
+  setSelectedDiseaseOption(value);
+
+  if (value === "Other") {
+    setShowOtherDiseaseInput(true);
+    setFormData((prev) => ({ ...prev, Disease_Name: "" }));
+  } else {
+    setShowOtherDiseaseInput(false);
+    setFormData((prev) => ({ ...prev, Disease_Name: value }));
+  }
+};
+
+const handleSubmit = async (e) => {
+  e.preventDefault();
+
+  // 🔹 If disease is custom (Other), add it to DiseaseType first
+  if (showOtherDiseaseInput && formData.Disease_Name.trim()) {
+    const newDisease = formData.Disease_Name.trim();
+
+    await addDiseaseType(formData.Category, newDisease);
+
+    // 🔁 Refresh disease list
+    await fetchDiseaseTypes(formData.Category);
+
+    // ✅ Select newly added disease in dropdown
+    setSelectedDiseaseOption(newDisease);
+    setShowOtherDiseaseInput(false);
+  }
+
+  if (!formData.Employee_ID) {
+    alert("Please select an employee.");
+    return;
+  }
+
+  const payload = {
+    Institute_ID: formData.Institute_ID,
+    Employee_ID: formData.Employee_ID,
+    IsFamilyMember: formData.IsFamilyMember,
+    FamilyMember_ID: formData.FamilyMember_ID || null,
+    Disease_Name: formData.Disease_Name,
+    Category: formData.Category,
+    Description: formData.Description,
+    Symptoms: formData.Symptoms.split(",").map((s) => s.trim()).filter(Boolean),
+    Common_Medicines: formData.Common_Medicines.split(",").map((m) => m.trim()).filter(Boolean),
+    Severity_Level: formData.Severity_Level,
+    Notes: formData.Notes,
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  try {
+    await axios.post(
+      `http://localhost:${BACKEND_PORT_NO}/disease-api/diseases`,
+      payload
+    );
 
-    if (!formData.Employee_ID) {
-      alert("Please select an employee.");
-      return;
-    }
+    alert("✅ Disease record saved successfully!");
 
-    const payload = {
+    setFormData({
       Institute_ID: formData.Institute_ID,
-      Employee_ID: formData.Employee_ID,
-      IsFamilyMember: formData.IsFamilyMember,
-      FamilyMember_ID: formData.FamilyMember_ID || null,
-      Disease_Name: formData.Disease_Name,
-      Category: formData.Category,
-      Description: formData.Description,
-      Symptoms: formData.Symptoms.split(",").map((s) => s.trim()).filter(s => s),
-      Common_Medicines: formData.Common_Medicines.split(",").map((m) => m.trim()).filter(m => m),
-      Severity_Level: formData.Severity_Level,
-      Notes: formData.Notes,
-    };
+      Employee_ID: "",
+      IsFamilyMember: false,
+      FamilyMember_ID: "",
+      Disease_Name: "",
+      Category: "Communicable",
+      Description: "",
+      Symptoms: "",
+      Common_Medicines: "",
+      Severity_Level: "Mild",
+      Notes: "",
+    });
 
-    console.log("Submitting payload:", payload);
-
-    try {
-      const response = await axios.post(
-        `http://localhost:${BACKEND_PORT_NO}/disease-api/diseases`,
-        payload
-      );
-      
-      alert("✅ Disease record saved successfully!");
-      console.log("Response:", response.data);
-
-      // Reset form
-      setFormData({
-        Institute_ID: formData.Institute_ID, // Keep institute ID
-        Employee_ID: "",
-        IsFamilyMember: false,
-        FamilyMember_ID: "",
-        Disease_Name: "",
-        Category: "Communicable",
-        Description: "",
-        Symptoms: "",
-        Common_Medicines: "",
-        Severity_Level: "Mild",
-        Notes: "",
-      });
-      setSearchTerm("");
-      setFamilyMembers([]);
-      setShowOtherDiseaseInput(false);
-      setFilteredEmployees([]);
-    } catch (err) {
-      console.error("Error saving disease:", err.response?.data || err.message);
-      alert(`❌ Error saving disease record: ${err.response?.data?.message || err.message}`);
-    }
-  };
+    setSelectedDiseaseOption("");
+    setSearchTerm("");
+    setFamilyMembers([]);
+    setShowOtherDiseaseInput(false);
+    setFilteredEmployees([]);
+  } catch (err) {
+    console.error("Error saving disease:", err);
+    alert("❌ Failed to save disease record");
+  }
+};
 
   // Choose list based on category
-  const currentDiseaseList =
-    formData.Category === "Communicable"
-      ? communicableDiseases
-      : nonCommunicableDiseases;
+  // const currentDiseaseList =
+  //   formData.Category === "Communicable"
+  //     ? communicableDiseases
+  //     : nonCommunicableDiseases;
 
   return (
     <div
@@ -440,23 +495,17 @@ const Diseases = () => {
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", marginBottom: 6, fontWeight: "bold" }}>Disease Name</label>
             <select
-              name="Disease_Name"
-              value={formData.Disease_Name}
-              onChange={handleDiseaseNameChange}
-              required
-              style={{
-                width: "100%",
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid #ccc",
-              }}
-            >
+  value={selectedDiseaseOption}
+  onChange={handleDiseaseNameChange}
+  required
+>
+
               <option value="">Select Disease</option>
-              {currentDiseaseList.map((disease, idx) => (
-                <option key={idx} value={disease}>
-                  {disease}
-                </option>
-              ))}
+               {diseaseTypes.map((d) => (
+            <option key={d._id} value={d.Disease_Name}>
+              {d.Disease_Name}
+            </option>
+          ))}
               <option value="Other">Other (specify below)</option>
             </select>
           </div>
@@ -464,15 +513,16 @@ const Diseases = () => {
           {showOtherDiseaseInput && (
             <div style={{ marginBottom: 16 }}>
               <input
-                type="text"
-                placeholder="Enter custom disease name"
-                value={formData.Disease_Name}
-                onChange={(e) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    Disease_Name: e.target.value,
-                  }))
-                }
+    type="text"
+    placeholder="Enter custom disease name"
+    value={formData.Disease_Name}
+    onChange={(e) =>
+      setFormData((prev) => ({
+        ...prev,
+        Disease_Name: e.target.value,
+      }))
+    }
+  
                 required
                 style={{
                   width: "100%",

@@ -574,94 +574,102 @@ instituteApp.get("/employee/:id", verifyToken, async (req, res) => {
     });
   }
 });
-instituteApp.get("/analytics/:instituteId", async (req, res) => {
+instituteApp.get("/analytics", async (req, res) => {
   try {
-    const { instituteId } = req.params;
-    console.log("Analytics request for instituteId:", instituteId);
-    if (!mongoose.Types.ObjectId.isValid(instituteId)) {
-      return res.status(400).json({ message: "Invalid institute ID" });
-    }
+    const analytics = await mongoose.connection
+      .collection("employees")
+      .aggregate([
+        // 🔗 Join diseases collection (optional)
+        {
+          $lookup: {
+            from: "diseases",
+            localField: "_id",
+            foreignField: "Employee_ID",
+            as: "externalDiseases"
+          }
+        },
 
-    const analytics = await DiagnosisRecord.aggregate([
-      {
-        $match: {
-          Institute: new mongoose.Types.ObjectId(instituteId)
-        }
-      },
+        // ✅ Keep employees with ANY medical data
+        {
+          $match: {
+            $or: [
+              { "Medical_History.0": { $exists: true } },
+              { "externalDiseases.0": { $exists: true } }
+            ]
+          }
+        },
 
-      // 🔗 Join Employee
-      {
-        $lookup: {
-          from: "employees",
-          localField: "Employee",
-          foreignField: "_id",
-          as: "employee"
-        }
-      },
-      { $unwind: "$employee" },
-
-      // 🔗 Join Diseases
-      {
-        $lookup: {
-          from: "diseases",
-          localField: "Employee",
-          foreignField: "Employee_ID",
-          as: "diseases"
-        }
-      },
-
-      {
-        $project: {
-          _id: 1,
-          createdAt: 1,
-
-          Employee_Name: "$employee.Name",
-          Employee_ABS: "$employee.ABS_NO",
-          Designation: "$employee.Designation",
-
-          Diseases: {
-            $map: {
-              input: "$diseases",
-              as: "d",
-              in: "$$d.Disease_Name"
-            }
-          },
-
-          Diagnosis_Notes: "$Diagnosis_Notes",
-
-          Tests: "$Tests",
-
-          Medicines_Taken: {
-            $reduce: {
-              input: "$employee.Medical_History",
-              initialValue: [],
-              in: {
-                $concatArrays: ["$$value", "$$this.Medicines"]
+        // 🧾 Flatten medical history
+        {
+          $addFields: {
+            Medicines_Taken: {
+              $reduce: {
+                input: "$Medical_History",
+                initialValue: [],
+                in: { $concatArrays: ["$$value", "$$this.Medicines"] }
+              }
+            },
+            Diagnosis_Notes: {
+              $reduce: {
+                input: "$Medical_History",
+                initialValue: [],
+                in: {
+                  $concatArrays: [
+                    "$$value",
+                    [{ $ifNull: ["$$this.Diagnosis", ""] }]
+                  ]
+                }
+              }
+            },
+            Diseases_Internal: {
+              $reduce: {
+                input: "$Medical_History",
+                initialValue: [],
+                in: {
+                  $concatArrays: ["$$value", "$$this.Diseases"]
+                }
               }
             }
           }
-        }
-      },
+        },
 
-      { $sort: { createdAt: -1 } }
-    ]);
-    console.log("Analytics data fetched:", analytics.length, "records");
+        // 🧾 Final shape
+        {
+          $project: {
+            createdAt: 1,
+            Employee_Name: "$Name",
+            Employee_ABS: "$ABS_NO",
+            Designation: 1,
+
+            Diseases: {
+              $setUnion: [
+                "$externalDiseases.Disease_Name",
+                []
+              ]
+            },
+
+            Diagnosis_Notes: {
+              $filter: {
+                input: "$Diagnosis_Notes",
+                as: "d",
+                cond: { $ne: ["$$d", ""] }
+              }
+            },
+
+            Medicines_Taken: 1
+          }
+        },
+
+        { $sort: { createdAt: -1 } }
+      ])
+      .toArray();
 
     res.json(analytics);
-
   } catch (err) {
     console.error("Analytics error:", err);
     res.status(500).json({ message: err.message });
   }
 });
 
-
-// Optional: Token verification endpoint
-instituteApp.get("/verify-token", verifyToken, (req, res) => {
-  res.status(200).json({
-    message: "Token is valid",
-    user: req.user
-  });
-});
 
 module.exports = instituteApp;

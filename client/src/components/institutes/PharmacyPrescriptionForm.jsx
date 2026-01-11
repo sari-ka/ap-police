@@ -149,12 +149,12 @@ const PharmacyPrescriptionForm = () => {
       .filter((m) =>
         m.Medicine_Name?.toLowerCase().includes(medicineSearch.toLowerCase())
       )
-      .sort((a, b) => {
-        // Sub-store medicines first
-        if (a.Source?.subStore > 0 && b.Source?.subStore === 0) return -1;
-        if (a.Source?.subStore === 0 && b.Source?.subStore > 0) return 1;
-        return 0;
-      });
+     .sort((a, b) => {
+  if (a.Store_Type === "SUB_STORE" && b.Store_Type === "MAIN_STORE") return -1;
+  if (a.Store_Type === "MAIN_STORE" && b.Store_Type === "SUB_STORE") return 1;
+  return 0;
+});
+
 
     setFilteredMedicines(results);
   }, [medicineSearch, inventory]);
@@ -240,12 +240,10 @@ const PharmacyPrescriptionForm = () => {
 
         if (!selected) return prev;
 
-        if (selected.Source?.subStore === 0) {
-          alert(
-            "❌ This medicine is not available in sub-store. Please collect it from the main store."
-          );
-          return prev;
-        }
+        if (selected.Store_Type === "MAIN_STORE") {
+  alert("❌ This medicine is only available in main store.");
+  return;
+}
 
         updated[index] = {
           medicineId: selected.Medicine_Code,
@@ -370,12 +368,13 @@ const addMedicineToForm = (inventoryItem, quantity) => {
   const itemName = inventoryItem.Medicine_Name?.trim();
   const itemCode = inventoryItem.Medicine_Code?.trim();
   
-  if (inventoryItem.Source?.subStore === 0) {
-    alert(
-      `❌ "${itemName}" is not available in sub-store. Please collect from main store.`
-    );
-    return;
-  }
+ if (inventoryItem.Store_Type === "MAIN_STORE") {
+  alert(
+    `❌ "${inventoryItem.Medicine_Name}" is only in main store.`
+  );
+  return;
+}
+
 
   // Check if already in prescription (using trimmed code)
   const isAlreadyAdded = formData.Medicines.some(
@@ -712,15 +711,16 @@ value={
         </div>
       </div>
 
-      {m.Source?.subStore > 0 ? (
-        <span className="badge bg-success">
-          Available: {m.Source.subStore}
-        </span>
-      ) : (
-        <span className="badge bg-warning text-dark">
-          Not in sub-store
-        </span>
-      )}
+      {m.Store_Type === "SUB_STORE" ? (
+  <span className="badge bg-success">
+    Available: {m.Quantity}
+  </span>
+) : (
+  <span className="badge bg-warning text-dark">
+    Main store only
+  </span>
+)}
+
     </button>
   );
 })}

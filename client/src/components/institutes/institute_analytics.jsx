@@ -13,16 +13,24 @@ export default function InstituteAnalytics() {
   const [diseaseFilter, setDiseaseFilter] = useState("");
   const [medicineFilter, setMedicineFilter] = useState("");
 
+  // 📥 Fetch analytics
   useEffect(() => {
-    const institute = JSON.parse(localStorage.getItem("institute"));
-    if (!institute) return;
-
     axios
-      .get(
-        `http://localhost:${BACKEND_PORT}/institute-api/analytics/${institute._id}`
-      )
+      .get(`http://localhost:${BACKEND_PORT}/institute-api/analytics`)
       .then(res => {
-        setRows(res.data || []);
+        const safeData = (res.data || []).map(r => ({
+          ...r,
+          Employee_Name: r.Employee_Name || "",
+          Designation: r.Designation || "",
+          Diseases: Array.isArray(r.Diseases) ? r.Diseases : [],
+          Medicines_Taken: Array.isArray(r.Medicines_Taken)
+            ? r.Medicines_Taken
+            : [],
+          Tests: Array.isArray(r.Tests) ? r.Tests : [],
+          Diagnosis_Notes: r.Diagnosis_Notes || "",
+        }));
+
+        setRows(safeData);
         setLoading(false);
       })
       .catch(err => {
@@ -32,7 +40,7 @@ export default function InstituteAnalytics() {
       });
   }, []);
 
-  // 🔍 Filter logic
+  // 🔍 Filter logic (SAFE)
   const filteredRows = rows.filter(r => {
     const empMatch =
       employeeFilter === "" ||
@@ -71,6 +79,7 @@ export default function InstituteAnalytics() {
             onChange={e => setEmployeeFilter(e.target.value)}
           />
         </div>
+
         <div className="col-md-4">
           <input
             className="form-control"
@@ -79,6 +88,7 @@ export default function InstituteAnalytics() {
             onChange={e => setDiseaseFilter(e.target.value)}
           />
         </div>
+
         <div className="col-md-4">
           <input
             className="form-control"
@@ -115,13 +125,13 @@ export default function InstituteAnalytics() {
             {filteredRows.map((r, i) => (
               <tr key={i}>
                 <td>
-                  <strong>{r.Employee_Name}</strong>
+                  <strong>{r.Employee_Name || "—"}</strong>
                   <br />
-                  <small>{r.Designation}</small>
+                  <small>{r.Designation || "—"}</small>
                 </td>
 
                 <td>
-                  {r.Diseases.length
+                  {(r.Diseases || []).length
                     ? r.Diseases.join(", ")
                     : "—"}
                 </td>
@@ -129,17 +139,17 @@ export default function InstituteAnalytics() {
                 <td>{r.Diagnosis_Notes || "—"}</td>
 
                 <td>
-                  {r.Medicines_Taken.length
+                  {(r.Medicines_Taken || []).length
                     ? r.Medicines_Taken.map((m, idx) => (
                         <div key={idx}>
-                          {m.Medicine_Name} ({m.Quantity})
+                          {m.Medicine_Name || "—"} ({m.Quantity || 0})
                         </div>
                       ))
                     : "—"}
                 </td>
 
                 <td>
-                  {r.Tests.length
+                  {(r.Tests || []).length
                     ? r.Tests.map((t, idx) => (
                         <div key={idx}>
                           <strong>{t.Test_Name}</strong>: {t.Result_Value}
@@ -149,7 +159,9 @@ export default function InstituteAnalytics() {
                 </td>
 
                 <td>
-                  {new Date(r.createdAt).toLocaleDateString("en-GB")}
+                  {r.createdAt
+                    ? new Date(r.createdAt).toLocaleDateString("en-GB")
+                    : "—"}
                 </td>
               </tr>
             ))}
