@@ -13,11 +13,12 @@
     "@tailwindcss/vite": "^4.1.16",
     "axios": "^1.13.0",
     "bootstrap": "^5.3.8",
+    "chart.js": "^4.4.1",
+    "react-chartjs-2": "^5.2.0",
     "docx": "^9.5.1",
     "file-saver": "^2.0.5",
-    "i": "^0.3.7",
-    "jspdf": "^4.0.0",
-    "jspdf-autotable": "^5.0.7",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-hook-form": "^7.65.0",
@@ -35,9 +36,6 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.22",
     "globals": "^16.4.0",
-    "vite": "npm:rolldown-vite@7.1.14"
-  },
-  "overrides": {
-    "vite": "npm:rolldown-vite@7.1.14"
+    "vite": "^5.0.0"
   }
 }

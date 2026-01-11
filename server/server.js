@@ -1,7 +1,7 @@
+require('dotenv').config({ path: './.env' });
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-require('dotenv').config({ path: './.env' });
 const path = require("path");
 
 
@@ -27,12 +27,14 @@ const diseaseApp=require("./apis/institute_enter_disease");
 const ledgerApp = require("./apis/instituteLedgerApi");
 const indentApp = require("./apis/institute_indent_api");
 const dailyVisitRoutes = require("./apis/daily_visit_api");
+const aiQueryApp = require('./apis/ai_query_api');
 const medicalActionRoutes = require("./apis/medical_action_api");
 const doctorPrescriptionApi = require("./apis/doctor_prescription_api");
 const mainStoreApp = require("./apis/mainstore_api");
 
 app.use("/doctor-prescription-api", doctorPrescriptionApi);
 app.use("/api/visits", dailyVisitRoutes);
+app.use("/ai-api", aiQueryApp);
 app.use("/api/medical-actions", medicalActionRoutes);
 app.use("/medicine-api", medicineApp);
 app.use("/institute-api", instituteApp);

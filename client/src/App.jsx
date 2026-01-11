@@ -29,6 +29,7 @@ import MainStore from "./components/institutes/main_store"
 import SubStore from "./components/institutes/sub_store"
 import AddMainStoreMedicine from "./components/institutes/AddMainStoreMedicine";
 import TransferMainStoreMedicine from "./components/institutes/TransferMainstoreMedicine";
+import AIInsights from "./components/institutes/AIInsights";
 function App() {
   const router = createBrowserRouter([
     {
@@ -65,13 +66,18 @@ function App() {
       element:<MedicinesIssuedRegister/>
     },
     {
+      path: "/institutes/ai-insights",
+      element: <AIInsights />
+    },
+    {
       path:"institutions/diagnosis-entry",
       element:<DiagnosisEntryForm/>
     },
     {
       path:"institutions/prescriptions",
       element:<PharmacyPrescriptionForm/>
-    },{
+    },
+    {
       path:"institutions/diseases",
       element:<Diseases/>
     },{

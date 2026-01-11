@@ -7,4 +7,12 @@ export default defineConfig({
   plugins: [react(),
     tailwindcss()
   ],
+  optimizeDeps: {
+    exclude: ['core-js', 'canvg']
+  },
+  build: {
+    rollupOptions: {
+      external: (id) => id.startsWith('core-js/')
+    }
+  }
 })
