@@ -48,4 +48,41 @@ router.get("/today", async (req, res) => {
   }
 });
 
+// GET VISIT BY ID
+router.get("/:id", async (req, res) => {
+  try {
+    const visit = await DailyVisit.findById(req.params.id);
+    if (!visit) return res.status(404).json({ error: "Visit not found" });
+
+    res.json(visit);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET latest visit for employee
+router.get("/employee/latest/:employeeId", async (req, res) => {
+  const visit = await DailyVisit.findOne({
+    employee_id: req.params.employeeId,
+    "patient.type": "EMPLOYEE"
+  }).sort({ created_at: -1 });
+
+  res.json(visit || null);
+});
+
+
+// GET latest visit for family member
+router.get("/family/latest/:employeeId/:familyName", async (req, res) => {
+  const { employeeId, familyName } = req.params;
+
+  const visit = await DailyVisit.findOne({
+    employee_id: employeeId,
+    "patient.type": "FAMILY",
+    "patient.name": familyName
+  }).sort({ created_at: -1 });
+
+  res.json(visit || null);
+});
+
+
 module.exports = router;

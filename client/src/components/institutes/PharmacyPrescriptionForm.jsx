@@ -685,7 +685,7 @@ value={
                           onChange={(e) => setMedicineSearch(e.target.value)}
                         />
 
-// In your medicine dropdown display:
+{/*In your medicine dropdown display:*/}
 {filteredMedicines.map((m) => {
   const displayName = m.Medicine_Name?.trim();
   const displayCode = m.Medicine_Code?.trim();

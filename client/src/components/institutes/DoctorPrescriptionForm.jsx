@@ -11,6 +11,9 @@ const DoctorPrescriptionForm = () => {
 //   const [filteredEmployees, setFilteredEmployees] = useState([]);
   const [familyMembers, setFamilyMembers] = useState([]);
   const [lastTwoVisits, setLastTwoVisits] = useState([]);
+  const [visitSymptoms, setVisitSymptoms] = useState("");
+  const [visitDetails, setVisitDetails] = useState(null);
+
 
 //   const [inventory, setInventory] = useState([]);
 //   const [searchTerm, setSearchTerm] = useState("");
@@ -85,40 +88,6 @@ const DoctorPrescriptionForm = () => {
     setInstituteName(res.data?.Institute_Name || "");
   };
 
-//   const fetchEmployees = async () => {
-//     const res = await axios.get(
-//       `http://localhost:${BACKEND_PORT}/employee-api/all`
-//     );
-//     setEmployees(res.data.employees || []);
-//   };
-
-//   useEffect(() => {
-//   if (!medicineSearch.trim()) {
-//     setFilteredMedicines([]);
-//     return;
-//   }
-
-//   const results = inventory
-//     .filter((m) =>
-//       m.medicineName
-//         ?.toLowerCase()
-//         .includes(medicineSearch.toLowerCase())
-//     )
-//     .sort(
-//       (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
-//     );
-
-//   setFilteredMedicines(results);
-// }, [medicineSearch, inventory]);
-
-
-//   const fetchInventory = async (id) => {
-//     const res = await axios.get(
-//       `http://localhost:${BACKEND_PORT}/institute-api/inventory/${id}`
-//     );
-//     setInventory(res.data || []);
-//     console.log("PRESCRIPTION INVENTORY RESPONSE:", res.data);
-//   };
 
   const fetchDiseases = async (employeeId) => {
     try {
@@ -131,31 +100,18 @@ const DoctorPrescriptionForm = () => {
     }
   };
 
-  /* ================= EMPLOYEE SEARCH ================= */
-//   useEffect(() => {
-//     if (!searchTerm) {
-//       setFilteredEmployees([]);
-//       return;
-//     }
-
-//     setFilteredEmployees(
-//       employees.filter((e) => String(e.ABS_NO).includes(searchTerm))
-//     );
-//   }, [searchTerm, employees]);
-
-//   const selectEmployee = (emp) => {
-//     setFormData((f) => ({
-//       ...f,
-//       Employee_ID: emp._id,
-//       IsFamilyMember: false,
-//       FamilyMember_ID: ""
-//     }));
-
-//     setSearchTerm(emp.ABS_NO);
-//     setFilteredEmployees([]);
-//     fetchDiseases(emp._id);
-//   };
-
+  const fetchVisitDetails = async (visitId) => {
+    try {
+      const res = await axios.get(
+        `http://localhost:${BACKEND_PORT}/api/visits/${visitId}`
+      );
+      setVisitDetails(res.data);
+    } catch {
+      setVisitDetails(null);
+    }
+  };
+  
+  
   useEffect(() => {
     if (!formData.Employee_ID) return;
 
@@ -166,6 +122,22 @@ const DoctorPrescriptionForm = () => {
       .then((res) => setEmployeeProfile(res.data))
       .catch(() => setEmployeeProfile(null));
   }, [formData.Employee_ID]);
+
+  // 🔁 When switching back to EMPLOYEE, reload latest employee visit
+    useEffect(() => {
+      if (
+        formData.IsFamilyMember ||        // only run when employee mode
+        !formData.Employee_ID
+      ) return;
+
+      axios
+        .get(
+          `http://localhost:${BACKEND_PORT}/api/visits/employee/latest/${formData.Employee_ID}`
+        )
+        .then(res => setVisitDetails(res.data))
+        .catch(() => setVisitDetails(null));
+    }, [formData.IsFamilyMember, formData.Employee_ID]);
+
 
   /* ================= FAMILY MEMBERS ================= */
   useEffect(() => {
@@ -198,110 +170,6 @@ const DoctorPrescriptionForm = () => {
       new Date(d.createdAt) >= twoMonthsAgo
   );
 
-  /* ================= MEDICINE LIMIT VALIDATION (FIXED) ================= */
-//   const validateMedicineQuantity = async (index, medicineName, quantity) => {
-//   try {
-//     const res = await axios.post(
-//       `http://localhost:${BACKEND_PORT}/medicine-limit-api/validate-medicine-quantity`,
-//       {
-//         medicine_name: medicineName.trim(),
-//         quantity: Number(quantity)
-//       }
-//     );
-
-//     // clear error
-//     setMedicineErrors((prev) => {
-//       const updated = { ...prev };
-//       delete updated[index];
-//       return updated;
-//     });
-
-//   } catch (err) {
-//     const max = err?.response?.data?.max_quantity;
-
-//     setMedicineErrors((prev) => ({
-//       ...prev,
-//       [index]: `Maximum allowed quantity is ${max}`
-//     }));
-//   }
-// };
-
-
-  /* ================= MEDICINE HANDLERS ================= */
-//   const handleMedicineChange = (index, field, value) => {
-//     setFormData((prev) => {
-//       const updated = [...prev.Medicines];
-
-//       if (field === "medicineId") {
-//         const selected = inventory.find((m) => m.medicineId === value);
-//         updated[index] = {
-//           medicineId: selected?.medicineId || "",
-//           medicineName: selected?.medicineName || "",
-//           expiryDate: selected?.expiryDate || "",
-//           quantity: 0
-//         };
-
-//         // clear error when medicine changes
-//         setMedicineErrors((prevErr) => {
-//           const e = { ...prevErr };
-//           delete e[index];
-//           return e;
-//         });
-//       }
-
-//       if (field === "quantity") {
-//         updated[index].quantity = value;
-//         const selectedMedicine = inventory.find(
-//           (m) => m.medicineId === updated[index].medicineId
-//         );
-
-//         if (selectedMedicine) {
-//             const availableQty = selectedMedicine.quantity;
-//             const threshold = selectedMedicine.threshold;
-//             const requestedQty = Number(value);
-
-//             // ❌ HARD ERROR: insufficient stock
-//             if (requestedQty > availableQty) {
-//               setMedicineErrors((prev) => ({
-//                 ...prev,
-//                 [index]: `❌ Only ${availableQty} units available in stock`
-//               }));
-//               return { ...prev, Medicines: updated };
-//             }
-
-//             // ⚠️ SOFT WARNING: below threshold
-//             if (availableQty - requestedQty < threshold) {
-//               setMedicineErrors((prev) => {
-//                 // if a hard error already exists, do NOT override it
-//                 if (prev[index]?.startsWith("❌")) return prev;
-
-//                 return {
-//                   ...prev,
-//                   [index]: `⚠️ Warning: Stock will fall below threshold (${threshold}). Remaining: ${availableQty - requestedQty}`
-//                 };
-//               });
-//             } else {
-//               // clear stock warnings if safe
-//               setMedicineErrors((prev) => {
-//                 const copy = { ...prev };
-//                 delete copy[index];
-//                 return copy;
-//               });
-//             }
-//           }
-
-//         if (updated[index].medicineName && value > 0) {
-//           validateMedicineQuantity(
-//             index,
-//             updated[index].medicineName,
-//             value
-//           );
-//         }
-//       }
-
-//       return { ...prev, Medicines: updated };
-//     });
-//   };
 
   const addMedicine = () =>
     setFormData((prev) => ({
@@ -376,19 +244,47 @@ const DoctorPrescriptionForm = () => {
 
     alert("✅ Prescription saved successfully");
   };
-//   const filteredAndSortedInventory = inventory
-//   .filter((m) =>
-//     m.medicineName
-//       ?.toLowerCase()
-//       .includes(medicineSearch.toLowerCase())
-//   )
-//   .sort(
-//     (a, b) => new Date(a.expiryDate) - new Date(b.expiryDate)
-//   );
+  useEffect(() => {
+    if (
+      !formData.IsFamilyMember ||
+      !formData.FamilyMember_ID ||
+      !formData.Employee_ID
+    ) return;
+  
+    const family = familyMembers.find(
+      f => f._id === formData.FamilyMember_ID
+    );
+  
+    if (!family) return;
+  
+    axios
+      .get(
+        `http://localhost:${BACKEND_PORT}/api/visits/family/latest/${formData.Employee_ID}/${family.Name}`
+      )
+      .then(res => setVisitDetails(res.data))
+      .catch(() => setVisitDetails(null));
+  }, [formData.IsFamilyMember, formData.FamilyMember_ID]);
+  
+// Employee context → match by ABS_NO
+const isEmployeeContext =
+  !formData.IsFamilyMember &&
+  visitDetails?.patient?.type === "EMPLOYEE" &&
+  String(visitDetails?.employee_id) === String(formData.Employee_ID);
+
+// Family context → match by selected family member name
+const selectedFamilyName =
+  familyMembers.find(f => f._id === formData.FamilyMember_ID)?.Name;
+
+const isFamilyContext =
+  formData.IsFamilyMember &&
+  formData.FamilyMember_ID &&
+  visitDetails?.patient?.type === "FAMILY" &&
+  visitDetails?.patient?.name === selectedFamilyName;
 
 
   /* ================= UI ================= */
   return (
+    
     <div className="container-fluid mt-4">
       <div className="row justify-content-center">
         {/* FORM */}
@@ -441,31 +337,45 @@ const DoctorPrescriptionForm = () => {
                         IsFamilyMember: false,
                         FamilyMember_ID: ""
                         }));
+                       
 
                         fetchDiseases(employee._id);
                         fetchTopTwoPrescriptions(employee._id); // ✅ ADD THIS
+
+                        if (visit_id) {
+                          fetchVisitDetails(visit_id);
+                        }
                     }}
                     />
 
 
                 {/* FAMILY MEMBER */}
                 <div className="form-check mb-3">
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    checked={formData.IsFamilyMember}
-                    onChange={(e) =>
-                      setFormData((f) => ({
-                        ...f,
-                        IsFamilyMember: e.target.checked,
-                        FamilyMember_ID: ""
-                      }))
-                    }
-                  />
-                  <label className="form-check-label">
-                    Prescription for Family Member
-                  </label>
-                </div>
+              <input
+                className="form-check-input"
+                type="checkbox"
+                checked={formData.IsFamilyMember}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                
+                  setFormData((f) => ({
+                    ...f,
+                    IsFamilyMember: checked,
+                    FamilyMember_ID: ""
+                  }));
+                
+                  // only clear when switching CONTEXT
+                  if (!checked) {
+                    setVisitDetails(null); // switching back to employee
+                  }
+                }}
+                
+              />
+              <label className="form-check-label">
+                Prescription for Family Member
+              </label>
+            </div>
+
 
                 {formData.IsFamilyMember && (
                   <div className="mb-3">
@@ -491,6 +401,22 @@ const DoctorPrescriptionForm = () => {
                     </select>
                   </div>
                 )}
+             {isEmployeeContext && visitDetails?.patient?.symptoms && (
+                <div className="alert alert-info mt-3">
+                  <strong>Employee Symptoms:</strong>{" "}
+                  {visitDetails.patient.symptoms}
+                </div>
+              )}
+
+              {isFamilyContext && visitDetails?.patient?.symptoms && (
+                <div className="alert alert-info mt-3">
+                  <strong>Family Member Symptoms:</strong>{" "}
+                  {visitDetails.patient.symptoms}
+                </div>
+)}
+
+
+
 
                 {communicableRecent.length > 0 && (
                   <div className="alert alert-warning">
@@ -642,6 +568,9 @@ const DoctorPrescriptionForm = () => {
             </div>
           </div>
         )}
+
+
+
 
 {lastTwoVisits.length > 0 && (
   <div className="mt-4">

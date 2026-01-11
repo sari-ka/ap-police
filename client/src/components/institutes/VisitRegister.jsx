@@ -72,29 +72,37 @@ const VisitRegister = () => {
       return;
     }
   
-    const finalSymptoms = symptoms.trim(); // string
+    // 1️⃣ Prepare symptoms
+    const finalSymptoms = symptoms.trim();
   
+    // 2️⃣ Calculate age
+    const calculatedAge = isFamily
+      ? selectedFamily?.DOB
+        ? new Date().getFullYear() -
+          new Date(selectedFamily.DOB).getFullYear()
+        : null
+      : selectedEmployee?.DOB
+        ? new Date().getFullYear() -
+          new Date(selectedEmployee.DOB).getFullYear()
+        : null;
+  
+    // 3️⃣ PLACE THIS HERE 👇👇👇
     const patient = isFamily
       ? {
           type: "FAMILY",
           name: selectedFamily.Name,
           relation: selectedFamily.Relationship,
-          age: selectedFamily.DOB
-            ? new Date().getFullYear() -
-              new Date(selectedFamily.DOB).getFullYear()
-            : null,
+          age: calculatedAge,
           symptoms: finalSymptoms || ""
         }
       : {
           type: "EMPLOYEE",
           name: selectedEmployee.Name,
-          age: selectedEmployee.DOB
-            ? new Date().getFullYear() -
-              new Date(selectedEmployee.DOB).getFullYear()
-            : null,
+          age: calculatedAge,
           symptoms: finalSymptoms || ""
         };
   
+    // 4️⃣ Axios call
     setLoading(true);
     try {
       await axios.post(
@@ -108,6 +116,7 @@ const VisitRegister = () => {
   
       alert("✅ Visit Registered Successfully");
   
+      // reset state
       setSearch("");
       setSelectedEmployee(null);
       setIsFamily(false);
