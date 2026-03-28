@@ -2,7 +2,7 @@ const express = require("express");
 const expressAsyncHandler = require("express-async-handler");
 const FamilyMember = require("../models/family_member");
 const Employee = require("../models/employee");
-
+const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const FamilyApp = express.Router();
 
 
@@ -63,21 +63,25 @@ FamilyApp.post(
 );
 
 // Fetch Family Members by Employee
+// GET FAMILY MEMBERS FOR AN EMPLOYEE
 FamilyApp.get("/family/:employeeId", async (req, res) => {
   try {
     const employee = await Employee.findById(req.params.employeeId)
       .populate("FamilyMembers");
 
-    if (!employee)
+    if (!employee) {
       return res.status(404).json({ message: "Employee not found" });
+    }
 
-    res.json(employee.FamilyMembers || []);
+    res.json(employee.FamilyMembers); // ✅ matched by _id
   } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
+    res.status(500).json({
+      message: "Server error",
+      error: err.message
+    });
   }
 });
+
 FamilyApp.get(
   "/family-report/:id",
   expressAsyncHandler(async (req, res) => {

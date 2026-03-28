@@ -3,7 +3,7 @@ import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
 import { FaUserPlus, FaCamera, FaUser } from "react-icons/fa";
 import "bootstrap/dist/css/bootstrap.min.css";
-
+import "./EmployeeRegister.css"
 const EmployeeRegister = () => {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
@@ -19,6 +19,7 @@ const EmployeeRegister = () => {
     Height: "",
     Weight: "",
     Phone_No: "",
+    Gender:"",
     Address: {
       Street: "",
       District: "",
@@ -80,6 +81,59 @@ const EmployeeRegister = () => {
   const triggerFileInput = () => {
     fileInputRef.current.click();
   };
+const validateForm = () => {
+  const errors = [];
+
+  if (!formData.ABS_NO.trim()) {
+    errors.push("ABS Number is required");
+  } else if (!/^\d{6}$/.test(formData.ABS_NO)) {
+    errors.push("ABS number must be exactly 6 digits");
+  }
+
+  if (!formData.Name.trim() || formData.Name.length < 3) {
+    errors.push("Full Name must be at least 3 characters");
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(formData.Email)) {
+    errors.push("Enter a valid email address");
+  }
+
+  if (formData.Password.length < 6) {
+    errors.push("Password must be at least 6 characters long");
+  }
+
+  if (!formData.Gender) {
+    errors.push("Gender is required");
+  }
+
+  if (formData.Phone_No && !/^[6-9]\d{9}$/.test(formData.Phone_No)) {
+    errors.push("Enter valid 10-digit Indian phone number");
+  }
+
+  if (formData.Address.Pincode && !/^\d{6}$/.test(formData.Address.Pincode)) {
+    errors.push("Pincode must be 6 digits");
+  }
+
+  if (formData.Height && isNaN(formData.Height)) {
+    errors.push("Height must be numeric");
+  }
+
+  if (formData.Weight && isNaN(formData.Weight)) {
+    errors.push("Weight must be numeric");
+  }
+
+  if (formData.DOB) {
+    const dob = new Date(formData.DOB);
+    const today = new Date();
+    const age = today.getFullYear() - dob.getFullYear();
+    if (age < 18) {
+      errors.push("Employee must be at least 18 years old");
+    }
+  }
+
+  return errors;
+};
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -89,11 +143,14 @@ const EmployeeRegister = () => {
 
     try {
       // Validate required fields
-      if (!formData.ABS_NO || !formData.Name || !formData.Email || !formData.Password) {
-        setError("ABS Number, Name, Email, and Password are required");
-        setLoading(false);
-        return;
-      }
+      const validationErrors = validateForm();
+
+if (validationErrors.length > 0) {
+  setError(validationErrors.join(", "));
+  setLoading(false);
+  return;
+}
+
 
       // Create FormData object
       const formPayload = new FormData();
@@ -110,6 +167,7 @@ const EmployeeRegister = () => {
       formPayload.append("Weight", formData.Weight || "");
       formPayload.append("Phone_No", formData.Phone_No || "");
       formPayload.append("Street", formData.Address.Street || "");
+      formPayload.append("Gender", formData.Gender);
       formPayload.append("District", formData.Address.District || "");
       formPayload.append("State", formData.Address.State || "");
       formPayload.append("Pincode", formData.Address.Pincode || "");
@@ -124,11 +182,7 @@ const EmployeeRegister = () => {
       const response = await axios.post(
         `http://localhost:${BACKEND_PORT_NO}/employee-api/register`,
         formPayload,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
-        }
+        
       );
 
       setSuccess(response.data.message || "✅ Employee registered successfully!");
@@ -176,17 +230,93 @@ const EmployeeRegister = () => {
   return (
     <div className="min-vh-100 d-flex flex-column align-items-center justify-content-center py-5" 
          style={{ backgroundColor: "#f8f9fa" }}>
+          <style>
+{`
+  /* Label – calm & light */
+  .form-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #1F2933;
+    margin-bottom: 6px;
+  }
+
+  /* Card-style inputs */
+  .form-control,
+  .form-select {
+    background-color: #F8FAFC;
+    border: 1px solid #E6EEFA;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 14px;
+    transition: all 0.2s ease;
+  }
+
+  /* Focus – dashboard blue line */
+  .form-control:focus,
+  .form-select:focus {
+    background-color: #FFFFFF;
+    border-color: #4A70A9;
+    box-shadow: none;
+  }
+
+  /* Placeholder */
+  .form-control::placeholder {
+    color: #9AA4B2;
+    font-size: 13px;
+  }
+
+  /* Disabled */
+  .form-control:disabled,
+  .form-select:disabled {
+    background-color: #F1F5FB;
+    opacity: 0.8;
+  }
+
+  /* Spacing between fields */
+  .mb-3 {
+    margin-bottom: 16px !important;
+  }
+`}
+</style>
+  
+
+
       
       {/* Header */}
       <div className="text-center mb-4">
         <div className="d-flex justify-content-center align-items-center mb-3">
-          <div className="bg-primary text-white rounded-circle p-3">
-            <FaUserPlus size={28} />
+          <div
+            className="d-flex align-items-center justify-content-center"
+            style={{
+              width: "60px",
+              height: "60px",
+              borderRadius: "50%",
+              backgroundColor: "#E6EEFA",   // light blue circle
+              color: "#4A70A9",             // primary blue icon
+              boxShadow: "0 4px 10px rgba(0,0,0,0.08)",
+            }}
+          >
+            <FaUserPlus size={26} />
           </div>
         </div>
-        <h2 className="fw-bold text-dark">Employee Registration</h2>
-        <p className="text-muted">Create your employee account</p>
+
+        <h2
+          className="fw-semibold"
+          style={{ color: "#1F2933" }}
+        >
+          Employee Registration
+        </h2>
+
+        <p
+          style={{
+            color: "#6B7280",
+            fontSize: "14px",
+          }}
+        >
+          Create your employee account
+        </p>
       </div>
+
 
       {/* Error Message */}
       {error && (
@@ -213,80 +343,89 @@ const EmployeeRegister = () => {
       )}
 
       {/* Form Card */}
-      <div className="bg-white shadow-lg rounded-3 p-4 w-100" style={{ maxWidth: "900px" }}>
+      <div
+  className="bg-white p-4 w-100"
+  style={{
+    maxWidth: "900px",
+    borderRadius: "14px",
+    border: "1px solid #D6E0F0",
+    boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+  }}
+>
+
         <form onSubmit={handleSubmit}>
           <div className="row">
             
             {/* Left Column - Personal Details */}
             <div className="col-lg-6">
-              <h5 className="fw-bold text-dark mb-3 border-bottom pb-2">Personal Details</h5>
+            <h5
+            className="fw-semibold mb-3 pb-2"
+            style={{
+              color: "#1F2933",
+              borderBottom: "2px solid #EAF2FF",
+            }}
+          >
+          Personal Details</h5>
               
               {/* Profile Picture Upload */}
-              <div className="mb-4 text-center">
-                <div 
-                  className="rounded-circle border border-3 border-secondary mx-auto d-flex align-items-center justify-content-center mb-3"
-                  style={{
-                    width: "120px",
-                    height: "120px",
-                    backgroundColor: profilePreview ? "transparent" : "#f8f9fa",
-                    cursor: "pointer",
-                    overflow: "hidden"
-                  }}
-                  onClick={triggerFileInput}
-                >
-                  {profilePreview ? (
-                    <img 
-                      src={profilePreview} 
-                      alt="Profile Preview" 
-                      className="w-100 h-100 object-fit-cover"
-                    />
-                  ) : (
-                    <div className="text-center">
-                      <FaUser size={40} className="text-secondary mb-2" />
-                      <p className="text-muted small mb-0">Click to upload</p>
-                    </div>
-                  )}
-                </div>
-                
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleProfilePicChange}
-                  accept="image/*"
-                  className="d-none"
-                />
-                
-                <button
-                  type="button"
-                  onClick={triggerFileInput}
-                  className="btn btn-outline-dark btn-sm px-3 py-2 mb-2"
-                  style={{ borderRadius: "8px" }}
-                >
-                  <FaCamera className="me-2" />
-                  {profilePic ? "Change Photo" : "Upload Photo"}
-                </button>
-                
-                {profilePic && (
-                  <p className="text-muted small">
-                    Selected: {profilePic.name}
-                  </p>
-                )}
-              </div>
+             <div className="mb-4 text-center">
+  {/* Profile Circle */}
+  <div
+    className="rounded-circle mx-auto d-flex align-items-center justify-content-center"
+    style={{
+      width: "120px",
+      height: "120px",
+      border: "2px dashed #D6E0F0",
+      backgroundColor: profilePreview ? "#FFFFFF" : "#F8FAFC",
+      cursor: "pointer",
+      overflow: "hidden",
+      transition: "border-color 0.2s ease",
+    }}
+    onClick={triggerFileInput}
+  >
+    {profilePreview ? (
+      <img
+        src={profilePreview}
+        alt="Profile Preview"
+        className="w-100 h-100 object-fit-cover"
+      />
+    ) : (
+      <FaUser size={38} style={{ color: "#9AA4B2" }} />
+    )}
+  </div>
+
+  {/* Hint text */}
+  <p
+    style={{
+      marginTop: "8px",
+      fontSize: "12px",
+      color: "#6B7280",
+    }}
+  >
+    Click to upload profile photo
+  </p>
+
+  {/* Hidden input */}
+  <input
+    type="file"
+    ref={fileInputRef}
+    onChange={handleProfilePicChange}
+    accept="image/*"
+    className="d-none"
+  />
+
+  {/* Action button */}
+ 
+
+  {profilePic && (
+    <p className="text-muted small mt-1">
+      {profilePic.name}
+    </p>
+  )}
+</div>
+
 
               {/* Required Fields */}
-              <div className="mb-3">
-                <label className="form-label fw-semibold">ABS Number *</label>
-                <input
-                  type="text"
-                  name="ABS_NO"
-                  className="form-control"
-                  placeholder="Enter ABS Number"
-                  value={formData.ABS_NO}
-                  onChange={handleChange}
-                  required
-                  disabled={loading}
-                />
-              </div>
 
               <div className="mb-3">
                 <label className="form-label fw-semibold">Full Name *</label>
@@ -296,11 +435,85 @@ const EmployeeRegister = () => {
                   className="form-control"
                   placeholder="Enter full name"
                   value={formData.Name}
-                  onChange={handleChange}
+                  onChange={(e) => {
+  const value = e.target.value;
+  if (/^[A-Za-z\s]*$/.test(value)) {
+    handleChange(e);
+  }
+}}
+
                   required
                   disabled={loading}
                 />
               </div>
+              <div className="row">
+  {/* ABS Number */}
+  <div className="col-md-6 mb-3">
+    <label className="form-label fw-semibold">ABS Number *</label>
+    <input
+      type="text"
+      name="ABS_NO"
+      className="form-control"
+      placeholder="Enter ABS Number"
+      value={formData.ABS_NO}
+      onChange={handleChange}
+      onKeyPress={(e) => {
+        if (!/[0-9]/.test(e.key)) {
+          e.preventDefault();
+        }
+      }}
+      maxLength="6"
+      required
+      disabled={loading}
+    />
+  </div>
+
+  {/* Gender */}
+  <div className="col-md-6 mb-3">
+    <label className="form-label fw-semibold d-block">Gender *</label>
+
+    <div className="form-check form-check-inline">
+      <input
+        className="form-check-input"
+        type="radio"
+        name="Gender"
+        value="Male"
+        checked={formData.Gender === "Male"}
+        onChange={handleChange}
+        disabled={loading}
+        required
+      />
+      <label className="form-check-label">Male</label>
+    </div>
+
+    <div className="form-check form-check-inline">
+      <input
+        className="form-check-input"
+        type="radio"
+        name="Gender"
+        value="Female"
+        checked={formData.Gender === "Female"}
+        onChange={handleChange}
+        disabled={loading}
+      />
+      <label className="form-check-label">Female</label>
+    </div>
+
+    <div className="form-check form-check-inline">
+      <input
+        className="form-check-input"
+        type="radio"
+        name="Gender"
+        value="Other"
+        checked={formData.Gender === "Other"}
+        onChange={handleChange}
+        disabled={loading}
+      />
+      <label className="form-check-label">Other</label>
+    </div>
+  </div>
+</div>
+             
 
               <div className="row">
                 <div className="col-md-6 mb-3">
@@ -334,15 +547,39 @@ const EmployeeRegister = () => {
               <div className="row">
                 <div className="col-md-6 mb-3">
                   <label className="form-label fw-semibold">Designation</label>
-                  <input
-                    type="text"
+                  <select
                     name="Designation"
-                    className="form-control"
-                    placeholder="Enter designation"
+                    className="form-select"
                     value={formData.Designation}
                     onChange={handleChange}
                     disabled={loading}
-                  />
+                  >
+                    <option value="">Select Designation</option>
+                    <option value="HC">HC</option>
+                    <option value="ARSI">ARSI</option>
+                    <option value="ASI">ASI</option>
+                    <option value="RSI">RSI</option>
+                    <option value="SI">SI</option>
+                    <option value="RI">RI</option>
+                    <option value="CI">CI</option>
+                    <option value="DSP">DSP</option>
+                    <option value="AC">AC</option>
+                    <option value="Adl.Commandant">Adl.Commandant</option>
+                    <option value="Adl.SP">Adl.SP</option>
+                    <option value="SP">SP</option>
+                    <option value="COMMANDANT">COMMANDANT</option>
+                    <option value="DIG">DIG</option>
+                    <option value="IG">IG</option>
+                    <option value="ADGP">ADGP</option>
+                    <option value="DGP">DGP</option>
+                    <option value="AO">AO</option>
+                    <option value="SR.Assistant">SR.Assistant</option>
+                    <option value="Jr.Assistant">Jr.Assistant</option>
+                    <option value="Superintendent">Superintendent</option>
+                    <option value="CLASS IV">CLASS IV</option>
+                    <option value="Record Assistant">Record Assistant</option>
+                    <option value="COOK">CooK</option>
+                  </select>
                 </div>
                 <div className="col-md-6 mb-3">
                   <label className="form-label fw-semibold">Date of Birth</label>
@@ -360,7 +597,14 @@ const EmployeeRegister = () => {
 
             {/* Right Column - Additional Details */}
             <div className="col-lg-6">
-              <h5 className="fw-bold text-dark mb-3 border-bottom pb-2">Additional Information</h5>
+            <h5
+            className="fw-semibold mb-3 pb-2"
+            style={{
+              color: "#1F2933",
+              borderBottom: "2px solid #EAF2FF",
+            }}
+          >
+          Additional Information</h5>
               
               <div className="row">
                 <div className="col-md-6 mb-3">
@@ -425,7 +669,14 @@ const EmployeeRegister = () => {
                 </div>
               </div>
 
-              <h5 className="fw-bold text-dark mb-3 border-bottom pb-2 mt-4">Address Details</h5>
+              <h5
+              className="fw-semibold mb-3 pb-2"
+              style={{
+                color: "#1F2933",
+                borderBottom: "2px solid #EAF2FF",
+              }}
+            >
+            Address Details</h5>
               
               <div className="mb-3">
                 <label className="form-label fw-semibold">Street</label>
@@ -486,13 +737,27 @@ const EmployeeRegister = () => {
           <div className="text-center mt-4">
             <button
               type="submit"
-              className="btn btn-primary btn-lg px-5 py-2"
               disabled={loading}
-              style={{ minWidth: "200px" }}
+              style={{
+                backgroundColor: "#4A70A9",
+                color: "#FFFFFF",
+                border: "none",
+                borderRadius: "999px",
+                padding: "10px 36px",
+                fontSize: "14px",
+                fontWeight: 500,
+                minWidth: "200px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
+                transition: "all 0.2s ease",
+              }}
             >
               {loading ? (
                 <>
-                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                  <span
+                    className="spinner-border spinner-border-sm me-2"
+                    role="status"
+                    aria-hidden="true"
+                  ></span>
                   Registering...
                 </>
               ) : (
@@ -503,9 +768,16 @@ const EmployeeRegister = () => {
 
           {/* Login Link */}
           <div className="text-center mt-3">
-            <p className="text-muted">
+            <p style={{ fontSize: "13px", color: "#6B7280" }}>
               Already have an account?{" "}
-              <Link to="/employee-login" className="text-primary fw-semibold text-decoration-none">
+              <Link
+                to="/employee-login"
+                style={{
+                  color: "#4A70A9",
+                  fontWeight: 600,
+                  textDecoration: "none",
+                }}
+              >
                 Login here
               </Link>
             </p>

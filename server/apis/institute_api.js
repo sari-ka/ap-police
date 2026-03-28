@@ -1,16 +1,24 @@
 const express = require('express');
 const expressAsyncHandler = require('express-async-handler');
-const mongoose = require('mongoose')
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const axios = require('axios');
+const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const instituteApp = express.Router();
 const Institute = require('../models/master_institute');
-const Manufacturer = require("../models/master_manufacture");
 const Medicine = require("../models/master_medicine");  
-const Order = require("../models/master_order");
 const Employee = require("../models/employee"); 
 const InstituteLedger = require("../models/InstituteLedger");
+const MainStoreMedicine = require("../models/main_store");
+const DiagnosisRecord = require("../models/diagnostics_record"); 
+const FamilyMember = require("../models/family_member");
+const Disease = require("../models/disease");
 
-instituteApp.get("/institutions", async (req, res) => {
+
+// GET all institutes
+instituteApp.get("/institutions",verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"), async (req, res) => {
   try {
     const institutions = await Institute.find();
     res.json(institutions);
@@ -19,148 +27,160 @@ instituteApp.get("/institutions", async (req, res) => {
   }
 });
 
-// POST - Register new institute
+// GET all institutes except one
+instituteApp.get("/except/:id", verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"),async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(id)
+    
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid institute ID" });
+    }
+
+    const institutes = await Institute.find({
+      _id: { $ne: id }
+    })
+    .select("Institute_Name Address District Institute_ID")
+    .sort({ Institute_Name: 1 });
+
+    res.json(institutes);
+
+  } catch (err) {
+    console.error("Get institutes except one error:", err);
+    res.status(500).json({
+      message: "Failed to fetch institutes",
+      error: err.message
+    });
+  }
+});
+
+// POST - Register new institute (with password hashing)
 instituteApp.post(
   "/register/institute",
+
   expressAsyncHandler(async (req, res) => {
-    const instituteData = req.body;
+    try {
+      const instituteData = req.body;
 
-    const {
-      Institute_Name,
-      Email_ID,
-      password,
-      confirm_password,
-      Address,
-      Contact_No
-    } = instituteData;
+      const {
+        Institute_Name,
+        Email_ID,
+        password,
+        confirm_password,
+        Address,
+        Contact_No
+      } = instituteData;
 
-    // 🔒 Required field check
-    if (
-  !Institute_Name ||
-  !Email_ID ||
-  !password ||
-  !Address ||
-  !Address.Street ||
-  !Address.District ||
-  !Address.State ||
-  !Address.Pincode
-) {
-  return res.status(400).send({ message: "All required fields must be provided" });
-}
+      // 🔒 Required field check
+      if (
+        !Institute_Name ||
+        !Email_ID ||
+        !password ||
+        !Address ||
+        !Address.Street ||
+        !Address.District ||
+        !Address.State ||
+        !Address.Pincode
+      ) {
+        return res.status(400).send({ message: "All required fields must be provided" });
+      }
 
-    const existingInstitute = await Institute.findOne({ Institute_Name });
-    if (existingInstitute) {
-      return res.status(409).send({ message: "Institute already exists" });
+      // Check if passwords match
+      if (confirm_password && password !== confirm_password) {
+        return res.status(400).send({ message: "Passwords do not match" });
+      }
+
+      // Check if institute already exists
+      const existingInstitute = await Institute.findOne({ 
+        $or: [
+          { Institute_Name },
+          { Email_ID }
+        ]
+      });
+      
+      if (existingInstitute) {
+        return res.status(409).send({ 
+          message: existingInstitute.Institute_Name === Institute_Name 
+            ? "Institute name already exists" 
+            : "Email already registered"
+        });
+      }
+
+      // Hash password before saving
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(password, salt);
+
+      const newInstitute = new Institute({
+        Institute_Name,
+        Email_ID,
+        password: hashedPassword, // Store hashed password
+        Contact_No,
+        Address,
+        Medicine_Inventory: []
+      });
+
+      const savedInstitute = await newInstitute.save();
+
+      // Remove password from response
+      const instituteResponse = savedInstitute.toObject();
+      delete instituteResponse.password;
+
+      res.status(201).send({
+        message: "Institute registered successfully",
+        payload: instituteResponse
+      });
+    } catch (err) {
+      console.error("Institute registration error:", err);
+      
+      if (err.code === 11000) {
+        return res.status(409).json({ 
+          message: "Duplicate entry. Institute name or email already exists." 
+        });
+      }
+      
+      if (err.name === 'ValidationError') {
+        const errors = Object.values(err.errors).map(e => e.message);
+        return res.status(400).json({ 
+          message: "Validation failed", 
+          errors 
+        });
+      }
+      
+      res.status(500).json({ 
+        message: "Registration failed", 
+        error: err.message 
+      });
     }
-
-    const newInstitute = new Institute({
-      Institute_Name,
-      Email_ID,
-      password, // store only password
-      Contact_No,
-      Address,
-      Medicine_Inventory: [],
-      Orders: []
-    });
-
-    const savedInstitute = await newInstitute.save();
-
-    res.status(201).send({
-      message: "Institute registered successfully",
-      payload: savedInstitute
-    });
   })
 );
 
 
-// POST - Login Institute
-instituteApp.post(
-  '/institute/login',
-  expressAsyncHandler(async (req, res) => {
-    const { Email_ID, password } = req.body;
-
-    // Validate fields
-    if (!Email_ID || !password) {
-      return res
-        .status(400)
-        .send({ message: "Email and Password are required" });
-    }
-
-    // Find institute by email
-    const institute = await Institute.findOne({ Email_ID: Email_ID.trim() });
-
-    if (!institute) {
-      return res.status(401).send({ message: "Invalid email or password" });
-    }
-
-    // Match password (plain text version — ideally hash this later)
-    if (institute.password !== password) {
-      return res.status(401).send({ message: "Invalid email or password" });
-    }
-
-    res.status(200).send({
-      message: "Login successful",
-      payload: institute,
-    });
-  })
-);
-
-// POST - Place New Order
-instituteApp.post(
-  "/institute/placeorder/:id",
-  expressAsyncHandler(async (req, res) => {
-    const instituteId = req.params.id;
-    const { Manufacturer_ID, Medicine_ID, Quantity_Requested } = req.body;
-
-    console.log("Received order request:", req.body);
-
-    // ✅ Validate required fields
-    if (!Manufacturer_ID || !Medicine_ID || !Quantity_Requested) {
-      return res.status(400).send({ message: "All fields are required" });
-    }
-
-    // ✅ Find the institute by ID
-    const institute = await Institute.findById(instituteId);
-    if (!institute) {
-      return res.status(404).send({ message: "Institute not found" });
-    }
-
-    // ✅ Create a new order object
-    const newOrder = {
-      Manufacturer_ID,
-      Medicine_ID,
-      Quantity_Requested,
-      Status: "PENDING",
-      Order_Date: new Date(),
-    };
-
-    // ✅ Push the new order to the institute's Orders array
-    institute.Orders.push(newOrder);
-
-    // ✅ Save updated document
-    await institute.save();
-
-    console.log("Order placed successfully for Institute:", institute.Institute_Name);
-
-    res.status(201).send({
-      message: "Order placed successfully",
-      payload: newOrder,
-    });
-  })
-);
-
-instituteApp.get('/profile/:id', async (req, res) => {
+// GET institute profile (protected route)
+// GET institute profile (protected route)
+instituteApp.get('/profile/:id', verifyToken, async (req, res) => {
   try {
+
+    if (req.user.instituteId !== req.params.id && req.user.role !== "admin") {
+      return res.status(403).json({ 
+        message: "Access denied. Not authorized to view this profile." 
+      });
+    }
+
     const institute = await Institute.findById(req.params.id)
       .populate('Medicine_Inventory.Medicine_ID', 'Medicine_Name Threshold_Qty')
-      .populate('Orders.Medicine_ID', 'Medicine_Name Threshold_Qty')
-      .populate('Orders.Manufacturer_ID', 'Manufacturer_Name');
+      .select('-password');
 
-    if (!institute) return res.status(404).json({ message: 'Institute not found' });
+    if (!institute) {
+      return res.status(404).json({ 
+        message: 'Institute not found' 
+      });
+    }
 
-    // compute inventory summary using populated Medicine_Inventory
     const totalDistinct = institute.Medicine_Inventory.length;
-    const totalQuantity = institute.Medicine_Inventory.reduce((sum, item) => sum + (item.Quantity || 0), 0);
+    const totalQuantity = institute.Medicine_Inventory.reduce(
+      (sum, item) => sum + (item.Quantity || 0), 0
+    );
 
     const lowStock = institute.Medicine_Inventory
       .filter(item => item.Medicine_ID && typeof item.Medicine_ID.Threshold_Qty === 'number')
@@ -172,7 +192,6 @@ instituteApp.get('/profile/:id', async (req, res) => {
         threshold: item.Medicine_ID.Threshold_Qty
       }));
 
-    // recent orders (sorted descending by Order_Date), limit to 10
     const recentOrders = (institute.Orders || [])
       .slice()
       .sort((a, b) => new Date(b.Order_Date) - new Date(a.Order_Date))
@@ -188,268 +207,90 @@ instituteApp.get('/profile/:id', async (req, res) => {
       },
       recentOrders
     });
+
   } catch (err) {
     console.error('Error in GET /profile/:id', err);
-    return res.status(500).json({ message: 'Server error', error: err.message });
+    return res.status(500).json({ 
+      message: 'Server error', 
+      error: err.message 
+    });
   }
 });
-
-// PUT /institute-api/profile/:id
-// update some top-level profile fields (only fields from existing schema)
-// Allowed updates: Institute_Name, Address, Email_ID, password, Contact_No
-instituteApp.put('/profile/:id', async (req, res) => {
+// PUT /institute-api/profile/:id (protected route)
+instituteApp.put('/profile/:id', verifyToken,allowInstituteRoles(), async (req, res) => {
   try {
-    const allowed = ['Institute_Name', 'Address', 'Email_ID', 'password', 'Contact_No'];
+    // Authorization check
+    if (req.user.id !== req.params.id) {
+      return res.status(403).json({ 
+        message: "Access denied. Can only update own profile." 
+      });
+    }
+
+    const allowed = ['Institute_Name', 'Address', 'Email_ID', 'Contact_No'];
     const update = {};
+    
     allowed.forEach(field => {
       if (req.body[field] !== undefined) update[field] = req.body[field];
     });
 
+    // Handle password update separately
+    if (req.body.password && req.body.confirm_password) {
+      if (req.body.password !== req.body.confirm_password) {
+        return res.status(400).json({ 
+          message: 'Passwords do not match' 
+        });
+      }
+      
+      const salt = await bcrypt.genSalt(10);
+      update.password = await bcrypt.hash(req.body.password, salt);
+    } else if (req.body.password && !req.body.confirm_password) {
+      return res.status(400).json({ 
+        message: 'Confirm password is required when changing password' 
+      });
+    }
+
     if (Object.keys(update).length === 0) {
-      return res.status(400).json({ message: 'No valid fields to update' });
-    }
-
-    const institute = await Institute.findByIdAndUpdate(req.params.id, update, { new: true })
-      .populate('Medicine_Inventory.Medicine_ID', 'Medicine_Name Threshold_Qty')
-      .populate('Orders.Medicine_ID', 'Medicine_Name Threshold_Qty')
-      .populate('Orders.Manufacturer_ID', 'Manufacturer_Name');
-
-    if (!institute) return res.status(404).json({ message: 'Institute not found' });
-
-    return res.json({ message: 'Updated', profile: institute });
-  } catch (err) {
-    console.error('Error in PUT /profile/:id', err);
-    return res.status(500).json({ message: 'Server error', error: err.message });
-  }
-});
-// ✅ Place order route (final version)
-// POST /institute-api/place_order/:instituteId
-// place_order: create Order doc and link to institute + manufacturer
-instituteApp.post("/place_order/:id", expressAsyncHandler(async (req, res) => {
-  console.log("✅ place_order route hit with:", req.params);
-  const instituteId = req.params.id;
-  const { Manufacturer_ID, Medicine_ID, Quantity_Requested } = req.body;
-
-  if (!Manufacturer_ID || !Medicine_ID || !Quantity_Requested) {
-    return res.status(400).send({ message: "All fields are required" });
-  }
-
-  if (!mongoose.Types.ObjectId.isValid(instituteId)
-      || !mongoose.Types.ObjectId.isValid(Manufacturer_ID)
-      || !mongoose.Types.ObjectId.isValid(Medicine_ID)) {
-    return res.status(400).send({ message: "Invalid IDs provided" });
-  }
-
-  const institute = await Institute.findById(instituteId);
-  if (!institute) return res.status(404).send({ message: "Institute not found" });
-
-  const manufacturer = await Manufacturer.findById(Manufacturer_ID);
-  if (!manufacturer) return res.status(404).send({ message: "Manufacturer not found" });
-
-  const medicine = await Medicine.findById(Medicine_ID);
-  if (!medicine) return res.status(404).send({ message: "Medicine not found" });
-
-  // Create Order document
-  const order = await Order.create({
-    Institute_ID: institute._id,
-    Manufacturer_ID,
-    Medicine_ID,
-    Quantity_Requested,
-    manufacture_Status: "PENDING",
-    institute_Status: "PENDING",
-    Order_Date: new Date()
-  });
-
-  // Link to Institute and Manufacturer
-  institute.Orders.push(order._id);
-  manufacturer.Orders.push(order._id);
-
-  await institute.save();
-  await manufacturer.save();
-
-  return res.status(201).json({ message: "Order placed successfully", orderId: order._id });
-}));
-
-// Example: GET /institute-api/orders/:instituteId?status=PENDING
-instituteApp.get("/orders/:instituteId", expressAsyncHandler(async (req, res) => {
-  try {
-    const { instituteId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(instituteId)) return res.status(400).json({ error: "Invalid institute ID" });
-
-    // Load institute and populate Orders (which are refs to Order docs)
-    const institute = await Institute.findById(instituteId)
-      .populate({
-        path: "Orders",
-        populate: [
-          { path: "Medicine_ID", select: "Medicine_Name Type Category" },
-          { path: "Manufacturer_ID", select: "Manufacturer_Name" }
-        ]
-      })
-      .lean();
-
-    if (!institute) return res.status(404).json({ error: "Institute not found" });
-
-    const orders = (institute.Orders || []).map(o => ({
-      _id: o._id,
-      Medicine_ID: o.Medicine_ID,
-      Manufacturer_ID: o.Manufacturer_ID,
-      Manufacturer_Name: o.Manufacturer_ID?.Manufacturer_Name || "Unknown",
-      Quantity_Requested: o.Quantity_Requested,
-      institute_Status: o.institute_Status,
-      manufacture_Status: o.manufacture_Status,
-      Order_Date: o.Order_Date,
-      Delivery_Date: o.Delivery_Date || null,
-      Remarks: o.Remarks
-    }));
-
-    return res.status(200).json(orders);
-  } catch (err) {
-    console.error("Error fetching institute orders:", err);
-    return res.status(500).json({ error: "Internal Server Error", details: err.message });
-  }
-}));
-
-// PATCH /institute-api/orders/:orderId/status
-// routes/instituteOrders.js
-// institute_api.js
-// server side: put this route in the same file where instituteApp is defined
-// Replace your existing delivered route with this exact code
-// institute marks its side delivered
-instituteApp.put(
-  "/orders/:manufacturerId/:orderId/delivered",
-  async (req, res) => {
-    try {
-      const { manufacturerId, orderId } = req.params;
-
-      const order = await Order.findById(orderId);
-      if (!order)
-        return res.status(404).json({ message: "Order not found" });
-
-      // Institute can deliver only after approval
-      if (order.institute_Status !== "APPROVED") {
-        return res
-          .status(400)
-          .json({ message: "Order must be approved first" });
-      }
-
-      // Mark institute delivered
-      order.institute_Status = "DELIVERED";
-      if (!order.Delivery_Date) order.Delivery_Date = new Date();
-      await order.save();
-
-      // 🔒 IMPORTANT: DO NOTHING ELSE unless manufacturer also delivered
-      if (order.manufacture_Status !== "DELIVERED") {
-        return res.json({
-          message:
-            "Institute delivery recorded. Waiting for manufacturer delivery.",
-          finalDelivered: false
-        });
-      }
-
-      // ✅ BOTH SIDES DELIVERED → NOW update inventory + ledger
-      const institute = await Institute.findById(order.Institute_ID);
-      const medicine = await Medicine.findById(order.Medicine_ID).populate(
-        "Manufacturer_ID",
-        "Manufacturer_Name"
-      );
-
-      const qty = Number(order.Quantity_Requested);
-
-      let invItem = institute.Medicine_Inventory.find(
-        (m) => m.Medicine_ID.toString() === order.Medicine_ID.toString()
-      );
-
-      if (invItem) {
-        invItem.Quantity += qty;
-      } else {
-        institute.Medicine_Inventory.push({
-          Medicine_ID: order.Medicine_ID,
-          Quantity: qty
-        });
-        invItem = institute.Medicine_Inventory.at(-1);
-      }
-
-      await institute.save();
-
-      // ✅ LEDGER ENTRY (IN) — ONLY HERE
-      await InstituteLedger.create({
-        Institute_ID: institute._id,
-        Transaction_Type: "ORDER_DELIVERY",
-        Reference_ID: order._id,
-        Medicine_ID: order.Medicine_ID,
-        Medicine_Name: medicine.Medicine_Name,
-        Manufacturer_Name:
-          medicine.Manufacturer_ID?.Manufacturer_Name || "",
-        Expiry_Date: medicine.Expiry_Date,
-        Direction: "IN",
-        Quantity: qty,
-        Balance_After: invItem.Quantity
+      return res.status(400).json({ 
+        message: 'No valid fields to update' 
       });
-
-      return res.json({
-        message: "Order fully delivered (both sides confirmed)",
-        finalDelivered: true
-      });
-    } catch (err) {
-      console.error("Institute deliver error:", err);
-      return res.status(500).json({ error: err.message });
-    }
-  }
-);
-
-instituteApp.get("/inventory/:instituteId", async (req, res) => {
-  try {
-    const { instituteId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(instituteId)) {
-      return res.status(400).json({ error: "Invalid Institute ID" });
     }
 
-    const institute = await Institute.findById(instituteId).populate({
-      path: "Medicine_Inventory.Medicine_ID",
-      model: "Medicine",
-      populate: {
-        path: "Manufacturer_ID",
-        model: "Manufacturer",
-      },
-    });
+    const institute = await Institute.findByIdAndUpdate(
+      req.params.id, 
+      update, 
+      { new: true, runValidators: true }
+    )
+    .populate('Medicine_Inventory.Medicine_ID', 'Medicine_Name Threshold_Qty')
+    .select('-password');
 
     if (!institute) {
-      return res.status(404).json({ error: "Institute not found" });
+      return res.status(404).json({ 
+        message: 'Institute not found' 
+      });
     }
 
-    const inventory = institute.Medicine_Inventory.map((item) => ({
-      medicineId: item.Medicine_ID?._id,
-      medicineCode: item?.Medicine_ID?.Medicine_Code,
-      medicineName: item.Medicine_ID?.Medicine_Name,
-      manufacturerName: item.Medicine_ID?.Manufacturer_ID?.Manufacturer_Name,
-      quantity: item.Quantity,
-      threshold: item.Medicine_ID?.Threshold_Qty || 0,
-      expiryDate: item.Medicine_ID?.Expiry_Date || null,
-    }));
-
-    res.status(200).json(inventory);
+    return res.json({ 
+      message: 'Profile updated successfully', 
+      profile: institute 
+    });
   } catch (err) {
-    console.error("Inventory fetch error:", err);
-    res.status(500).json({ error: "Failed to fetch inventory" });
+    console.error('Error in PUT /profile/:id', err);
+    
+    if (err.code === 11000) {
+      return res.status(409).json({ 
+        message: 'Email or Institute Name already exists' 
+      });
+    }
+    
+    return res.status(500).json({ 
+      message: 'Server error', 
+      error: err.message 
+    });
   }
 });
 
-
-// GET single institute by ID
-instituteApp.get("/institution/:id", async (req, res) => {
-  try {
-    console.log(req.params.id)
-    const institute = await Institute.findById(req.params.id);
-    if (!institute) return res.status(404).json({ message: "Institute not found" });
-    res.json(institute);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /institute-api/dashboard-stats/:instituteId - UPDATED VERSION
-instituteApp.get("/dashboard-stats/:instituteId", async (req, res) => {
+instituteApp.get("/inventory/:instituteId",verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"), async (req, res) => {
   try {
     const { instituteId } = req.params;
 
@@ -457,31 +298,131 @@ instituteApp.get("/dashboard-stats/:instituteId", async (req, res) => {
       return res.status(400).json({ message: "Invalid institute ID" });
     }
 
-    // 1️⃣ Total Employees (with all new fields)
+    const instituteObjectId = new mongoose.Types.ObjectId(instituteId);
+
+    const [mainStoreMeds, subStoreMeds] = await Promise.all([
+      MainStoreMedicine.find({ Institute_ID: instituteObjectId }).lean(),
+      Medicine.find({ Institute_ID: instituteObjectId }).lean()
+    ]);
+
+    const inventoryMap = {};
+
+    // MAIN STORE
+    for (const m of mainStoreMeds) {
+      inventoryMap[m.Medicine_Code] = {
+        Medicine_Code: m.Medicine_Code,
+        Medicine_Name: m.Medicine_Name,
+        mainQty: m.Quantity,
+        subQty: 0,
+        mainExpiry: m.Expiry_Date,
+        subExpiry: null
+      };
+    }
+
+    // SUB STORE
+    for (const m of subStoreMeds) {
+      if (!inventoryMap[m.Medicine_Code]) {
+        inventoryMap[m.Medicine_Code] = {
+          Medicine_Code: m.Medicine_Code,
+          Medicine_Name: m.Medicine_Name,
+          mainQty: 0,
+          subQty: m.Quantity,
+          mainExpiry: null,
+          subExpiry: m.Expiry_Date
+        };
+      } else {
+        inventoryMap[m.Medicine_Code].subQty = m.Quantity;
+        inventoryMap[m.Medicine_Code].subExpiry = m.Expiry_Date;
+      }
+    }
+
+    // FINAL RESPONSE
+    const inventory = Object.values(inventoryMap).map((item) => {
+      let status = "";
+      let quantity = 0;
+      let expiry = null;
+
+      if (item.subQty > 0) {
+        quantity = item.subQty;
+        status = "Available in substore";
+        expiry = item.subExpiry;
+      } else if (item.mainQty > 0) {
+        quantity = 0;
+        status = "Not available in substore";
+        expiry = item.mainExpiry;
+      } else {
+        quantity = 0;
+        status = "Not available in both";
+      }
+
+      return {
+        Medicine_Code: item.Medicine_Code,
+        Medicine_Name: item.Medicine_Name,
+        Quantity: quantity,
+        Status: status,
+        Expiry_Date: expiry
+      };
+    });
+
+    res.status(200).json(inventory);
+
+  } catch (err) {
+    console.error("Institute inventory error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
+// GET single institute by ID
+instituteApp.get("/institution/:id", verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"), async (req, res) => {
+  try {
+    const institute = await Institute.findById(req.params.id).select('-password');
+    if (!institute) {
+      return res.status(404).json({ 
+        message: "Institute not found" 
+      });
+    }
+    res.json(institute);
+  } catch (err) {
+    res.status(500).json({ 
+      error: err.message 
+    });
+  }
+});
+
+// GET dashboard stats (protected route)
+instituteApp.get("/dashboard-stats/:instituteId",verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"),async (req, res) => {
+  try {
+    const { instituteId } = req.params;
+
+    // Authorization check
+    if (req.user.id !== instituteId && req.user.role !== "admin") {
+      return res.status(403).json({ 
+        message: "Access denied. Not authorized to view dashboard." 
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(instituteId)) {
+      return res.status(400).json({ 
+        message: "Invalid institute ID" 
+      });
+    }
+
+    // 1️⃣ Total Employees
     const totalEmployees = await Employee.countDocuments();
 
     // 2️⃣ Registered Employees (same as total employees for now)
     const registeredEmployees = totalEmployees;
 
-    // 3️⃣ Total Orders Placed by this institute
+    // 3️⃣ Fetch institute
     const institute = await Institute.findById(instituteId).lean();
     if (!institute) {
-      return res.status(404).json({ message: "Institute not found" });
+      return res.status(404).json({ 
+        message: "Institute not found" 
+      });
     }
-
-    // Count PENDING orders
-    const pendingOrdersCount = await Order.countDocuments({
-      Institute_ID: instituteId,
-      institute_Status: "PENDING"
-    });
-
-    // Count DELIVERED orders
-    const deliveredOrdersCount = await Order.countDocuments({
-      Institute_ID: instituteId,
-      institute_Status: "DELIVERED"
-    });
-
-    const totalOrdersPlaced = institute.Orders?.length || 0;
 
     // 4️⃣ Total medicines in inventory
     const totalMedicinesInInventory = institute.Medicine_Inventory?.reduce((sum, item) => 
@@ -495,25 +436,27 @@ instituteApp.get("/dashboard-stats/:instituteId", async (req, res) => {
 
     return res.json({
       totalEmployees,
-      totalOrdersPlaced,
       registeredEmployees,
-      pendingOrdersCount,
-      deliveredOrdersCount,
       totalMedicinesInInventory,
       lowStockMedicines,
       inventoryItemCount: institute.Medicine_Inventory?.length || 0
     });
   } catch (err) {
     console.error("Dashboard stats error:", err);
-    return res.status(500).json({ message: "Server error", error: err.message });
+    return res.status(500).json({ 
+      message: "Server error", 
+      error: err.message 
+    });
   }
 });
 
-// GET /institute-api/employees-detailed - Get detailed employee list with all fields
-instituteApp.get("/employees-detailed", async (req, res) => {
+// GET detailed employees (protected route)
+instituteApp.get("/employees-detailed", verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"), async (req, res) => {
   try {
     const employees = await Employee.find({})
       .select('ABS_NO Name Email Designation DOB Phone_No Height Weight Address Blood_Group Photo Medical_History')
+      .select('-password') // Ensure password is not included
       .sort({ Name: 1 })
       .lean();
 
@@ -550,13 +493,16 @@ instituteApp.get("/employees-detailed", async (req, res) => {
   }
 });
 
-// GET /institute-api/employee/:id - Get single employee details
-instituteApp.get("/employee/:id", async (req, res) => {
+// GET single employee details (protected route)
+instituteApp.get("/employee/:id", verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"), async (req, res) => {
   try {
     const { id } = req.params;
     
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid employee ID" });
+      return res.status(400).json({ 
+        message: "Invalid employee ID" 
+      });
     }
 
     const employee = await Employee.findById(id)
@@ -564,7 +510,9 @@ instituteApp.get("/employee/:id", async (req, res) => {
       .lean();
 
     if (!employee) {
-      return res.status(404).json({ message: "Employee not found" });
+      return res.status(404).json({ 
+        message: "Employee not found" 
+      });
     }
 
     // Format the response
@@ -585,6 +533,492 @@ instituteApp.get("/employee/:id", async (req, res) => {
       error: err.message 
     });
   }
+});
+
+instituteApp.get("/analytics/:instituteId",verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"), async (req, res) => {
+  try {
+    const { instituteId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(instituteId)) {
+      return res.status(400).json({ message: "Invalid institute ID" });
+    }
+
+    const instituteObjectId = new mongoose.Types.ObjectId(instituteId);
+
+    /* =====================================================
+       EMPLOYEE PIPELINE
+    ======================================================*/
+    const employeePipeline = [
+      /* 🔹 Prescriptions */
+      {
+        $lookup: {
+          from: "prescriptions",
+          let: { empId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$Employee", "$$empId"] },
+                    { $eq: ["$Institute", instituteObjectId] },
+                    { $eq: ["$IsFamilyMember", false] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "prescriptions"
+        }
+      },
+
+      /* 🔹 Diagnosis Records */
+      {
+        $lookup: {
+          from: "diagnosisrecords",
+          let: { empId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$Employee", "$$empId"] },
+                    { $eq: ["$Institute", instituteObjectId] },
+                    { $eq: ["$IsFamilyMember", false] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "diagnosis"
+        }
+      },
+
+      /* 🔹 Diseases */
+      {
+        $lookup: {
+          from: "diseases",
+          let: { empId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$Employee_ID", "$$empId"] },
+                    { $eq: ["$Institute_ID", instituteObjectId] },
+                    { $eq: ["$IsFamilyMember", false] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "diseases"
+        }
+      },
+
+      /* 🔹 Include ONLY if any record exists */
+      {
+        $match: {
+          $expr: {
+            $or: [
+              { $gt: [{ $size: "$prescriptions" }, 0] },
+              { $gt: [{ $size: "$diagnosis" }, 0] },
+              { $gt: [{ $size: "$diseases" }, 0] }
+            ]
+          }
+        }
+      },
+
+      /* 🔹 Derived Fields */
+      {
+        $addFields: {
+          Age: {
+            $cond: [
+              { $ifNull: ["$DOB", false] },
+              {
+                $dateDiff: {
+                  startDate: "$DOB",
+                  endDate: "$$NOW",
+                  unit: "year"
+                }
+              },
+              null
+            ]
+          }
+        }
+      },
+
+      /* 🔹 Final Shape */
+      {
+        $project: {
+          Role: { $literal: "Employee" },
+          Name: "$Name",
+          Linked_Employee_Name: null,
+
+          District: "$Address.District",
+
+          Age: 1,
+          Gender: "$Gender",
+          Blood_Group: "$Blood_Group",
+          Height: "$Height",
+          Weight: "$Weight",
+
+          Communicable_Diseases: {
+            $map: {
+              input: {
+                $filter: {
+                  input: "$diseases",
+                  as: "d",
+                  cond: { $eq: ["$$d.Category", "Communicable"] }
+                }
+              },
+              as: "d",
+              in: {
+                $concat: [
+                  "$$d.Disease_Name",
+                  " (",
+                  "$$d.Severity_Level",
+                  ")"
+                ]
+              }
+            }
+          },
+
+          NonCommunicable_Diseases: {
+            $map: {
+              input: {
+                $filter: {
+                  input: "$diseases",
+                  as: "d",
+                  cond: { $eq: ["$$d.Category", "Non-Communicable"] }
+                }
+              },
+              as: "d",
+              in: {
+                $concat: [
+                  "$$d.Disease_Name",
+                  " (",
+                  "$$d.Severity_Level",
+                  ")"
+                ]
+              }
+            }
+          },
+
+          Tests: {
+            $reduce: {
+              input: "$diagnosis",
+              initialValue: [],
+              in: { $concatArrays: ["$$value", "$$this.Tests"] }
+            }
+          },
+
+          Medicines: {
+            $reduce: {
+              input: "$prescriptions",
+              initialValue: [],
+              in: { $concatArrays: ["$$value", "$$this.Medicines"] }
+            }
+          },
+          First_Visit_Date: {
+            $min: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: "$diagnosis",
+                    as: "d",
+                    in: "$$d.createdAt"
+                  }
+                },
+                {
+                  $map: {
+                    input: "$prescriptions",
+                    as: "p",
+                    in: "$$p.Timestamp"
+                  }
+                }
+              ]
+            }
+          },
+
+          Last_Visit_Date: {
+            $max: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: "$diagnosis",
+                    as: "d",
+                    in: "$$d.createdAt"
+                  }
+                },
+                {
+                  $map: {
+                    input: "$prescriptions",
+                    as: "p",
+                    in: "$$p.Timestamp"
+                  }
+                }
+              ]
+            }
+          }
+
+        }
+      }
+    ];
+
+    /* =====================================================
+       FAMILY MEMBER PIPELINE
+    ======================================================*/
+    const familyPipeline = [
+      /* 🔹 Prescriptions */
+      {
+        $lookup: {
+          from: "prescriptions",
+          let: { famId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$FamilyMember", "$$famId"] },
+                    { $eq: ["$Institute", instituteObjectId] },
+                    { $eq: ["$IsFamilyMember", true] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "prescriptions"
+        }
+      },
+
+      /* 🔹 Diagnosis Records */
+      {
+        $lookup: {
+          from: "diagnosisrecords",
+          let: { famId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$FamilyMember", "$$famId"] },
+                    { $eq: ["$Institute", instituteObjectId] },
+                    { $eq: ["$IsFamilyMember", true] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "diagnosis"
+        }
+      },
+
+      /* 🔹 Diseases */
+      {
+        $lookup: {
+          from: "diseases",
+          let: { famId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$FamilyMember_ID", "$$famId"] },
+                    { $eq: ["$Institute_ID", instituteObjectId] },
+                    { $eq: ["$IsFamilyMember", true] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: "diseases"
+        }
+      },
+
+      /* 🔹 Include ONLY if any record exists */
+      {
+        $match: {
+          $expr: {
+            $or: [
+              { $gt: [{ $size: "$prescriptions" }, 0] },
+              { $gt: [{ $size: "$diagnosis" }, 0] },
+              { $gt: [{ $size: "$diseases" }, 0] }
+            ]
+          }
+        }
+      },
+
+      /* 🔹 Join Employee (for name & district) */
+      {
+        $lookup: {
+          from: "employees",
+          localField: "Employee",
+          foreignField: "_id",
+          as: "emp"
+        }
+      },
+      { $unwind: "$emp" },
+
+      /* 🔹 Derived Fields */
+      {
+        $addFields: {
+          Age: {
+            $cond: [
+              { $ifNull: ["$DOB", false] },
+              {
+                $dateDiff: {
+                  startDate: "$DOB",
+                  endDate: "$$NOW",
+                  unit: "year"
+                }
+              },
+              null
+            ]
+          }
+        }
+      },
+
+      /* 🔹 Final Shape */
+      {
+        $project: {
+          Role: { $literal: "Family" },
+          Name: "$Name",
+          Linked_Employee_Name: "$emp.Name",
+
+          District: "$emp.Address.District",
+
+          Age: 1,
+          Gender: "$Gender",
+          Blood_Group: "$Blood_Group",
+          Height: "$Height",
+          Weight: "$Weight",
+
+          Communicable_Diseases: {
+            $map: {
+              input: {
+                $filter: {
+                  input: "$diseases",
+                  as: "d",
+                  cond: { $eq: ["$$d.Category", "Communicable"] }
+                }
+              },
+              as: "d",
+              in: {
+                $concat: [
+                  "$$d.Disease_Name",
+                  " (",
+                  "$$d.Severity_Level",
+                  ")"
+                ]
+              }
+            }
+          },
+
+          NonCommunicable_Diseases: {
+            $map: {
+              input: {
+                $filter: {
+                  input: "$diseases",
+                  as: "d",
+                  cond: { $eq: ["$$d.Category", "Non-Communicable"] }
+                }
+              },
+              as: "d",
+              in: {
+                $concat: [
+                  "$$d.Disease_Name",
+                  " (",
+                  "$$d.Severity_Level",
+                  ")"
+                ]
+              }
+            }
+          },
+
+          Tests: {
+            $reduce: {
+              input: "$diagnosis",
+              initialValue: [],
+              in: { $concatArrays: ["$$value", "$$this.Tests"] }
+            }
+          },
+
+          Medicines: {
+            $reduce: {
+              input: "$prescriptions",
+              initialValue: [],
+              in: { $concatArrays: ["$$value", "$$this.Medicines"] }
+            }
+          },
+
+          First_Visit_Date: {
+            $min: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: "$diagnosis",
+                    as: "d",
+                    in: "$$d.createdAt"
+                  }
+                },
+                {
+                  $map: {
+                    input: "$prescriptions",
+                    as: "p",
+                    in: "$$p.Timestamp"
+                  }
+                }
+              ]
+            }
+          },
+
+          Last_Visit_Date: {
+            $max: {
+              $concatArrays: [
+                {
+                  $map: {
+                    input: "$diagnosis",
+                    as: "d",
+                    in: "$$d.createdAt"
+                  }
+                },
+                {
+                  $map: {
+                    input: "$prescriptions",
+                    as: "p",
+                    in: "$$p.Timestamp"
+                  }
+                }
+              ]
+            }
+          }
+
+        }
+      }
+    ];
+
+    /* =====================================================
+       EXECUTE & RETURN
+    ======================================================*/
+    const employees = await Employee.aggregate(employeePipeline);
+    const family = await FamilyMember.aggregate(familyPipeline);
+
+    res.json([...employees, ...family]);
+  } catch (err) {
+    console.error("Analytics error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+
+// Optional: Token verification endpoint
+instituteApp.get("/verify-token", verifyToken,
+  allowInstituteRoles("doctor", "pharmacist", "diagnosis", "xray","front_desk"), (req, res) => {
+  res.status(200).json({
+    message: "Token is valid",
+    user: req.user
+  });
 });
 
 module.exports = instituteApp;

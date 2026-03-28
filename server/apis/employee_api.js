@@ -5,11 +5,12 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-
+const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const Employee = require("../models/employee");
 const Disease = require("../models/disease");
 const DiagnosisRecord = require("../models/diagnostics_record");
 const FamilyMember = require("../models/family_member");
+const MedicalAction = require("../models/medical_action");
 
 const employeeApp = express.Router();
 
@@ -19,7 +20,7 @@ const employeeApp = express.Router();
 const uploadDir = path.join(__dirname, '..', 'uploads', 'profile-pics');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
-  console.log("Created upload directory:", uploadDir);
+  
 }
 
 const storage = multer.diskStorage({
@@ -50,20 +51,68 @@ const upload = multer({
 });
 
 /* ================= REGISTER ================= */
+employeeApp.get(
+  "/health-report-detailed",
+  async (req, res) => {
+    try {
+      const { employeeId, isFamily, familyMemberId } = req.query;
+
+      if (!employeeId) {
+        return res.status(400).json({
+          message: "employeeId is required"
+        });
+      }
+
+      const diseaseFilter = {
+        Employee_ID: employeeId
+      };
+
+      const prescriptionFilter = {
+        employee_id: employeeId
+      };
+
+      if (isFamily === "true") {
+        diseaseFilter.IsFamilyMember = true;
+        diseaseFilter.FamilyMember_ID = familyMemberId;
+
+        prescriptionFilter["data.IsFamilyMember"] = true;
+        prescriptionFilter["data.FamilyMember_ID"] = familyMemberId;
+      } else {
+        diseaseFilter.IsFamilyMember = false;
+        prescriptionFilter["data.IsFamilyMember"] = false;
+      }
+
+      const diseases = await Disease.find(diseaseFilter).sort({ createdAt: -1 });
+
+      const medicalActions = await MedicalAction.find({
+        employee_id: employeeId,
+        action_type: { $in: ["DOCTOR_DIAGNOSIS", "DOCTOR_XRAY"] },
+        ...prescriptionFilter
+      }).sort({ Timestamp: -1 });
+
+      res.json({
+        diseases,
+        medicalActions
+      });
+
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 employeeApp.post(
   "/register",
   upload.single("Photo"), // Changed from Profile_Pic to Photo
   expressAsyncHandler(async (req, res) => {
     try {
-      console.log("Registration request received");
       
       // Parse the form data
       const data = req.body;
-      console.log("Form data received:", data);
 
       // Validate required fields
-      const requiredFields = ["ABS_NO", "Name", "Email", "Password"];
+      const requiredFields = ["ABS_NO", "Name", "Email", "Password","Gender"];
       const missingFields = requiredFields.filter(field => !data[field] || data[field].trim() === "");
       
       if (missingFields.length > 0) {
@@ -88,6 +137,7 @@ employeeApp.post(
         Height: data.Height ? data.Height.trim() : "",
         Weight: data.Weight ? data.Weight.trim() : "",
         Phone_No: data.Phone_No ? data.Phone_No.trim() : "",
+        Gender: data.Gender? data.Gender.trim() : "",
         Address: {
           Street: data.Street ? data.Street.trim() : "",
           District: data.District ? data.District.trim() : "",
@@ -100,7 +150,6 @@ employeeApp.post(
       if (req.file) {
         // Store relative path
         employeeData.Photo = `/uploads/profile-pics/${req.file.filename}`;
-        console.log("Profile photo saved:", employeeData.Photo);
       }
 
       // Check for duplicate email
@@ -253,34 +302,31 @@ employeeApp.get(
 
 /* ================= GET ALL EMPLOYEES ================= */
 
-employeeApp.get(
-  "/all",
-  expressAsyncHandler(async (req, res) => {
-    try {
-      const employees = await Employee.find({})
-        .select('ABS_NO Name Email Designation Photo')
-        .sort({ createdAt: -1 });
-      
-      res.status(200).json({
-        count: employees.length,
-        employees: employees
-      });
-    } catch (err) {
-      console.error("Get all employees error:", err);
-      res.status(500).json({ 
-        message: "Failed to fetch employees", 
-        error: err.message 
-      });
-    }
-  })
-);
+employeeApp.get("/all", async (req, res) => {
+  try {
+    const employees = await Employee.find({})
+      .select(
+        'ABS_NO Name Email DOB Blood_Group Height Weight Phone_No Gender Photo'
+      )
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      count: employees.length,
+      employees
+    });
+  } catch (err) {
+    res.status(500).json({
+      message: "Failed to fetch employees",
+      error: err.message
+    });
+  }
+});
+
 /* ================= EMPLOYEE + FAMILY HEALTH REPORT ================= */
 
-employeeApp.get(
-  "/health-report/:absNo",
-  expressAsyncHandler(async (req, res) => {
+employeeApp.get("/health-report", expressAsyncHandler(async (req, res) => {
     try {
-      const { absNo } = req.params;
+      const absNo = req.query.absNo;
 
       if (!absNo || absNo.trim() === "") {
         return res.status(400).json({
@@ -289,8 +335,10 @@ employeeApp.get(
       }
 
       // 🔹 Fetch Employee
-      const employee = await Employee.findOne({ ABS_NO: absNo.trim() })
-        .select("ABS_NO Name Email Photo");
+ const employee = await Employee.findOne({ ABS_NO: absNo.trim() })
+.select("ABS_NO Name Email Photo Gender DOB Height Weight Blood_Group Medical_History");
+
+
 
       if (!employee) {
         return res.status(404).json({
@@ -299,6 +347,22 @@ employeeApp.get(
       }
 
       const employeeId = employee._id;
+
+      let age = null;
+
+  if (employee.DOB) {
+    const today = new Date();
+    const dob = new Date(employee.DOB);
+    age = today.getFullYear() - dob.getFullYear();
+
+    const monthDiff = today.getMonth() - dob.getMonth();
+    if (
+      monthDiff < 0 ||
+      (monthDiff === 0 && today.getDate() < dob.getDate())
+    ) {
+      age--;
+    }
+  }
 
       /* =====================================================
          EMPLOYEE DISEASE RECORDS
@@ -347,12 +411,16 @@ employeeApp.get(
         .select("Tests FamilyMember Timestamp Diagnosis_Notes")
         .sort({ Timestamp: -1 });
 
+        console.log("Health report generated for employee:", employee.Name);
       /* =====================================================
          RESPONSE OBJECT
       ===================================================== */
       return res.status(200).json({
         message: "Health report fetched successfully",
-        employee,
+        employee: {
+          ...employee.toObject(),
+          Age: age,
+        },
         employeeDiseases,
         employeeDiagnosis,
         familyDiseases,

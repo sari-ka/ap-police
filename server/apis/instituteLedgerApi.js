@@ -1,32 +1,40 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const ledgerApp = express.Router();
-
+const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const InstituteLedger = require("../models/InstituteLedger");
 
 // ------------------------------------------------------------------
 // GET LEDGER FOR AN INSTITUTE
 // ------------------------------------------------------------------
 // GET /ledger-api/institute/:instituteId
+//
 // Optional query params:
 //   ?from=YYYY-MM-DD
 //   ?to=YYYY-MM-DD
-//   ?type=ORDER_DELIVERY | PRESCRIPTION_ISSUE
+//   ?type=STORE_TRANSFER | PRESCRIPTION_ISSUE
+//   ?direction=IN | OUT
 // ------------------------------------------------------------------
 
 ledgerApp.get("/institute/:instituteId", async (req, res) => {
   try {
     const { instituteId } = req.params;
-    const { from, to, type } = req.query;
+    const { from, to, type, direction } = req.query;
 
     if (!mongoose.Types.ObjectId.isValid(instituteId)) {
       return res.status(400).json({ message: "Invalid Institute ID" });
     }
 
-    const filter = { Institute_ID: instituteId };
+    const filter = {
+      Institute_ID: new mongoose.Types.ObjectId(instituteId)
+    };
 
     if (type) {
       filter.Transaction_Type = type;
+    }
+
+    if (direction) {
+      filter.Direction = direction;
     }
 
     if (from || to) {
@@ -44,6 +52,7 @@ ledgerApp.get("/institute/:instituteId", async (req, res) => {
       count: ledger.length,
       ledger
     });
+
   } catch (err) {
     console.error("Ledger fetch error:", err);
     res.status(500).json({
@@ -52,5 +61,6 @@ ledgerApp.get("/institute/:instituteId", async (req, res) => {
     });
   }
 });
+
 
 module.exports = ledgerApp;

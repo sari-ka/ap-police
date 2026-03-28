@@ -8,21 +8,28 @@ import "bootstrap/dist/css/bootstrap.min.css";
 const DiagnosisReport = () => {
   const [reports, setReports] = useState([]);
   const navigate = useNavigate();
-  const employeeId = localStorage.getItem("employeeId");
+  console.log("EmployeeObjectId from localStorage:", localStorage.getItem("employeeObjectId"));
   const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || 6100;
+  const employeeObjectId = localStorage.getItem("employeeObjectId")
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [showModal, setShowModal] = useState(false);
 
-  useEffect(() => {
-    if (!employeeId) return;
 
-    axios
-      .get(
-        `http://localhost:${BACKEND_PORT}/diagnosis-api/records/${employeeId}`
-      )
-      .then((res) => setReports(res.data || []))
-      .catch((err) =>
-        console.error("Error fetching diagnosis reports:", err)
-      );
-  }, [employeeId, BACKEND_PORT]);
+useEffect(() => {
+  if (!employeeObjectId) return;
+
+  axios
+    .get(`http://localhost:${BACKEND_PORT}/diagnosis-api/records/${employeeObjectId}`)
+    .then(res => setReports(res.data || []))
+    .catch(err => {
+      if (err.response?.status === 404) {
+        setReports([]);
+      } else {
+        console.error(err);
+      }
+    });
+}, [employeeObjectId, refreshKey]); // ✅ IMPORTANT
 
   /* ================= DATE FIX (ONLY createdAt) ================= */
   const formatDate = (report) => {
@@ -51,18 +58,41 @@ const DiagnosisReport = () => {
 
   /* ================= STATUS ================= */
   const getStatus = (result, range) => {
-    try {
-      const value = parseFloat(result);
-      const match = range?.match(/(\d+\.?\d*)-(\d+\.?\d*)/);
-      if (!match || isNaN(value)) return "N/A";
+  try {
+    const value = parseFloat(result);
+    if (isNaN(value) || !range) return "N/A";
 
-      const low = parseFloat(match[1]);
-      const high = parseFloat(match[2]);
+    // Normalize dash (– or — to -)
+    const normalizedRange = range.replace(/[–—]/g, "-").trim();
+
+    // Case 1: range like 7-56
+    const rangeMatch = normalizedRange.match(/^(\d+\.?\d*)-(\d+\.?\d*)$/);
+    if (rangeMatch) {
+      const low = parseFloat(rangeMatch[1]);
+      const high = parseFloat(rangeMatch[2]);
       return value >= low && value <= high ? "Normal" : "Risk";
-    } catch {
-      return "N/A";
     }
-  };
+
+    // Case 2: less than <5.7
+    const lessMatch = normalizedRange.match(/^<\s*(\d+\.?\d*)$/);
+    if (lessMatch) {
+      const limit = parseFloat(lessMatch[1]);
+      return value < limit ? "Normal" : "Risk";
+    }
+
+    // Case 3: greater than >10
+    const greaterMatch = normalizedRange.match(/^>\s*(\d+\.?\d*)$/);
+    if (greaterMatch) {
+      const limit = parseFloat(greaterMatch[1]);
+      return value > limit ? "Normal" : "Risk";
+    }
+
+    return "N/A"; // for "Varies by age and sex"
+  } catch {
+    return "N/A";
+  }
+};
+
 
   /* ================= LAB REPORT PDF ================= */
   const downloadLabReport = (report) => {
@@ -109,8 +139,8 @@ const DiagnosisReport = () => {
     const tableData = report.Tests.map((t) => [
       t.Test_Name,
       `${t.Result_Value} ${t.Units || ""}`,
-      t.Reference_Range || "-",
-      getStatus(t.Result_Value, t.Reference_Range)
+      t.Test_ID?.Reference_Range || t.Reference_Range || "-",
+      getStatus(t.Result_Value, t.Test_ID?.Reference_Range || t.Reference_Range)
     ]);
 
     autoTable(doc, {
@@ -134,29 +164,134 @@ const DiagnosisReport = () => {
     doc.save(`Lab_Report_${report._id.slice(-6)}.pdf`);
   };
 
-  return (
-    <div className="container mt-5">
+  const splitReportsByDate = (records) => {
+  const rows = [];
+
+  records.forEach((record) => {
+    if (!record.Tests || record.Tests.length === 0) return;
+
+    const grouped = {};
+
+    record.Tests.forEach((test) => {
+      if (!test.Timestamp) return;
+
+      // group by yyyy-mm-dd
+      const dateKey = new Date(test.Timestamp)
+        .toISOString()
+        .split("T")[0];
+
+      if (!grouped[dateKey]) grouped[dateKey] = [];
+      grouped[dateKey].push(test);
+    });
+
+    Object.values(grouped).forEach((testsForDate) => {
+      rows.push({
+        ...record,
+        Tests: testsForDate // ✅ override tests for that date only
+      });
+    });
+  });
+
+  // latest first
+  return rows.sort(
+    (a, b) =>
+      new Date(b.Tests[0].Timestamp) -
+      new Date(a.Tests[0].Timestamp)
+  );
+};
+
+return (
+  <div
+    style={{
+      backgroundColor: "#F8FAFC",
+      minHeight: "100vh",
+      padding: "40px 0",
+      fontFamily: "'Inter', sans-serif",
+    }}
+  >
+    <div className="container">
+
+      {/* Back Button */}
       <button
-        className="btn btn-outline-dark mb-3"
+        className="btn mb-3"
         onClick={() => navigate(-1)}
+        style={{
+          backgroundColor: "#FFFFFF",
+          border: "1px solid #D6E0F0",
+          borderRadius: "8px",
+          padding: "6px 14px",
+          fontSize: "14px",
+          color: "#1F2933",
+        }}
       >
         ← Back
       </button>
 
-      <div className="card shadow-sm">
+      {/* MAIN CARD */}
+      <div
+        className="card border-0"
+        style={{
+          borderRadius: "16px",
+          boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+        }}
+      >
         <div className="card-body">
-          <h4 className="text-center mb-4 fw-bold">
+
+          {/* Header Strip */}
+        <div
+          style={{
+            background: "linear-gradient(90deg, #F8FAFC, #F3F7FF)",
+            padding: "16px 24px",
+            borderBottom: "1px solid #D6E0F0",
+            borderRadius: "16px 16px 0 0",
+          }}
+          className="d-flex justify-content-between align-items-center"
+        >
+          <h4 style={{ fontWeight: 600, color: "#1F2933", margin: 0 }}>
             Diagnosis Reports
           </h4>
 
+          <button
+            className="btn btn-sm"
+            style={{
+              backgroundColor: "#4A70A9",
+              color: "#FFFFFF",
+              borderRadius: "999px",
+              padding: "6px 16px",
+              fontWeight: 500,
+              border: "none",
+            }}
+            onClick={() => setRefreshKey((p) => p + 1)}
+          >
+            Refresh
+          </button>
+        </div>
+
+
+          {/* Empty State */}
           {reports.length === 0 ? (
             <p className="text-center text-muted">
               No diagnosis reports found.
             </p>
           ) : (
             <div className="table-responsive">
-              <table className="table table-bordered align-middle">
-                <thead className="table-dark">
+                    <table
+        className="table align-middle"
+        style={{
+          border: "1px solid #D6E0F0",
+          borderRadius: "12px",
+          overflow: "hidden",
+        }}
+            >
+
+            <thead
+              style={{
+                backgroundColor: "#F3F7FF",
+                color: "#1F2933",
+                fontWeight: 600,
+              }}
+            >
+
                   <tr>
                     <th>#</th>
                     <th>Patient</th>
@@ -167,36 +302,73 @@ const DiagnosisReport = () => {
                     <th>Lab Report</th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  {reports.map((report, index) => (
-                    <tr key={report._id}>
+                  {splitReportsByDate(reports).map((report, index) => (
+                    <tr key={report._id + report.Tests[0]?.Timestamp}>
                       <td>{index + 1}</td>
+
                       <td>
-                        {report.Employee?.Name}{" "}
-                        {report.Employee?.ABS_NO
-                          ? `(${report.Employee.ABS_NO})`
-                          : ""}
+                        {report.Employee?.Name}
+                        {report.Employee?.ABS_NO &&
+                          ` (${report.Employee.ABS_NO})`}
                       </td>
+
                       <td>
                         {report.IsFamilyMember
                           ? `${report.FamilyMember?.Name} (${report.FamilyMember?.Relationship})`
                           : "Self"}
                       </td>
+
                       <td>
                         {report.Institute?.Institute_Name ||
                           "Medical Institute"}
                       </td>
+
                       <td>{report.Tests.length}</td>
+
                       <td>{formatDate(report)}</td>
+
                       <td>
-                        <button
-                          className="btn btn-sm btn-outline-primary"
-                          onClick={() =>
-                            downloadLabReport(report)
-                          }
-                        >
-                          Download Report
-                        </button>
+                        <td>
+                          <div className="d-flex gap-2">
+
+                            {/* VIEW BUTTON */}
+                            <button
+                              className="btn btn-sm"
+                              style={{
+                                borderRadius: "999px",
+                                border: "1px solid #4A70A9",
+                                backgroundColor: "#4A70A9",
+                                color: "#FFFFFF",
+                                fontWeight: 500,
+                              }}
+                              onClick={() => {
+                                setSelectedReport(report);
+                                setShowModal(true);
+                              }}
+                            >
+                              View
+                            </button>
+
+                            {/* DOWNLOAD BUTTON */}
+                            <button
+                              className="btn btn-sm"
+                              style={{
+                                borderRadius: "999px",
+                                border: "1px solid #4A70A9",
+                                backgroundColor: "#FFFFFF",
+                                color: "#4A70A9",
+                                fontWeight: 500,
+                              }}
+                              onClick={() => downloadLabReport(report)}
+                            >
+                              Download
+                            </button>
+
+                          </div>
+                        </td>
+
                       </td>
                     </tr>
                   ))}
@@ -207,7 +379,90 @@ const DiagnosisReport = () => {
         </div>
       </div>
     </div>
-  );
+    {showModal && selectedReport && (
+  <div className="modal fade show d-block" style={{ background: "rgba(0,0,0,0.5)" }}>
+    <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div className="modal-content">
+
+        <div className="modal-header bg-primary text-white">
+          <h5 className="modal-title">
+            Diagnosis Report Details
+          </h5>
+          <button
+            className="btn-close btn-close-white"
+            onClick={() => setShowModal(false)}
+          />
+        </div>
+
+        <div className="modal-body">
+
+          <p><strong>Employee:</strong> {selectedReport.Employee?.Name}</p>
+          <p>
+            <strong>Report For:</strong>{" "}
+            {selectedReport.IsFamilyMember
+              ? `${selectedReport.FamilyMember?.Name} (${selectedReport.FamilyMember?.Relationship})`
+              : "Self"}
+          </p>
+          <p><strong>Institute:</strong> {selectedReport.Institute?.Institute_Name}</p>
+          <p><strong>Date:</strong> {formatDate(selectedReport)}</p>
+
+          <hr />
+
+          <table className="table table-bordered">
+            <thead className="table-light">
+              <tr>
+                <th>Test Name</th>
+                <th>Result</th>
+                <th>Reference</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {selectedReport.Tests.map((t, i) => (
+                <tr key={i}>
+                  <td>{t.Test_Name}</td>
+                  <td>{t.Result_Value} {t.Units}</td>
+                  <td>{t.Test_ID?.Reference_Range || t.Reference_Range}</td>
+                  <td>
+                    <span className={`badge ${
+                      getStatus(t.Result_Value, t.Test_ID?.Reference_Range || t.Reference_Range) === "Normal"
+                        ? "bg-success"
+                        : "bg-danger"
+                    }`}>
+                      {getStatus(t.Result_Value, t.Test_ID?.Reference_Range || t.Reference_Range)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+        </div>
+
+        <div className="modal-footer">
+          <button
+            className="btn btn-secondary"
+            onClick={() => setShowModal(false)}
+          >
+            Close
+          </button>
+
+          <button
+            className="btn btn-primary"
+            onClick={() => downloadLabReport(selectedReport)}
+          >
+            Download PDF
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+)}
+
+  </div>
+);
+
 };
 
 export default DiagnosisReport;

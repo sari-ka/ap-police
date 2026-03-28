@@ -1,12 +1,14 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const diagnosisApp = express.Router();
-
+const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const DiagnosisTest = require("../models/diagnostics_test");
 const DiagnosisRecord = require("../models/diagnostics_record");
 const Institute = require("../models/master_institute");
 const Employee = require("../models/employee");
 const FamilyMember = require("../models/family_member");
+const MedicalAction = require("../models/medical_action");
+const DailyVisit = require("../models/daily_visit");
 
 // ✅ GET master test list
 diagnosisApp.get("/tests", async (req, res) => {
@@ -18,6 +20,68 @@ diagnosisApp.get("/tests", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch tests" });
   }
 });
+
+diagnosisApp.get("/visit/:visitId/doctor", async (req, res) => {
+  try {
+    const action = await MedicalAction.findOne({
+      visit_id: req.params.visitId,
+      action_type: "DOCTOR_DIAGNOSIS",
+      source: "DOCTOR"
+    })
+    .sort({ created_at: -1 });
+
+    if (!action) return res.status(200).json(null);
+
+    res.status(200).json(action);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch doctor diagnosis" });
+  }
+});
+
+diagnosisApp.get("/queue/:Institute_ID", async (req, res) => {
+  try {
+    const { Institute_ID } = req.params;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const visits = await DailyVisit.find({
+      Institute_ID,
+      visit_date: today
+    })
+      .populate("employee_id")
+      .populate("FamilyMember")
+      .sort({ token_no: 1 });
+
+    if (!visits.length) {
+      return res.status(200).json([]);
+    }
+
+    const visitIds = visits.map((visit) => visit._id);
+
+    const doctorDiagnosisActions = await MedicalAction.find({
+      visit_id: { $in: visitIds },
+      action_type: "DOCTOR_DIAGNOSIS",
+      source: "DOCTOR",
+      "data.tests.0": { $exists: true }
+    }).select("visit_id");
+
+    const allowedVisitIds = new Set(
+      doctorDiagnosisActions.map((action) => String(action.visit_id))
+    );
+
+    const diagnosisQueueVisits = visits.filter((visit) =>
+      allowedVisitIds.has(String(visit._id))
+    );
+
+    res.status(200).json(diagnosisQueueVisits);
+  } catch (err) {
+    console.error("Error fetching diagnosis queue visits:", err);
+    res.status(500).json({ error: "Failed to fetch diagnosis queue" });
+  }
+});
+
+
 
 // ✅ Add a new master test
 diagnosisApp.post("/tests/add", async (req, res) => {
@@ -39,7 +103,8 @@ diagnosisApp.post("/tests/add", async (req, res) => {
 });
 
 // ✅ Add a diagnosis record
-diagnosisApp.post("/add", async (req, res) => {
+diagnosisApp.post("/add",verifyToken,
+  allowInstituteRoles("diagnosis"), async (req, res) => {
   try {
     const { Institute_ID, Employee_ID, IsFamilyMember, FamilyMember_ID, Tests, Diagnosis_Notes } = req.body;
 
@@ -47,41 +112,95 @@ diagnosisApp.post("/add", async (req, res) => {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const recordQuery = { Institute: Institute_ID, Employee: Employee_ID, IsFamilyMember: !!IsFamilyMember };
+const recordQuery = {
+  Institute: Institute_ID,
+  Employee: Employee_ID
+};
+
+if (IsFamilyMember) {
+  recordQuery.FamilyMember = FamilyMember_ID;
+}
+
+
+
     if (IsFamilyMember) recordQuery.FamilyMember = FamilyMember_ID;
 
     let record = await DiagnosisRecord.findOne(recordQuery);
 
     if (!record) {
-      record = new DiagnosisRecord({
-        Institute: Institute_ID,
-        Employee: Employee_ID,
-        IsFamilyMember,
-        FamilyMember: FamilyMember_ID || null,
-        Tests: Tests.map(t => ({
-          Test_Name: t.Test_Name,
-          Group: t.Group || "",
-          Result_Value: t.Result_Value,
-          Reference_Range: t.Reference_Range || "",
-          Units: t.Units || "",
-          Remarks: t.Remarks || Diagnosis_Notes || "",
-        })),
-        Diagnosis_Notes: Diagnosis_Notes || "",
-      });
+  record = new DiagnosisRecord({
+    Institute: Institute_ID,
+    Employee: Employee_ID,
+    Visit: req.body.visit_id,
+    IsFamilyMember,
+    FamilyMember: FamilyMember_ID || null,
+    Tests: Tests.map(t => ({
+      Test_ID: t.Test_ID || null,   // 👈 ADD THIS LINE
+      Test_Name: t.Test_Name,
+      Group: t.Group || "",
+      Result_Value: t.Result_Value,
+      Reference_Range: t.Reference_Range || "",
+      Units: t.Units || "",
+      Remarks: t.Remarks || Diagnosis_Notes || "",
+    })),
+    Diagnosis_Notes: Diagnosis_Notes || "",
+  });
+}
+ else {
+  Tests.forEach(t => {
+
+   const existingTest = record.Tests.find(
+  rt => rt.Test_ID && t.Test_ID &&
+  rt.Test_ID.toString() === t.Test_ID.toString()
+);
+
+
+    if (existingTest) {
+      // UPDATE result
+      existingTest.Result_Value = t.Result_Value;
+      existingTest.Reference_Range = t.Reference_Range || existingTest.Reference_Range;
+      existingTest.Units = t.Units || existingTest.Units;
+      existingTest.Remarks = t.Remarks || Diagnosis_Notes || existingTest.Remarks;
+      existingTest.Timestamp = new Date();
     } else {
-      Tests.forEach(t => {
-        record.Tests.push({
-          Test_Name: t.Test_Name,
-          Group: t.Group || "",
-          Result_Value: t.Result_Value,
-          Reference_Range: t.Reference_Range || "",
-          Units: t.Units || "",
-          Remarks: t.Remarks || Diagnosis_Notes || "",
-        });
+      // ADD NEW test
+      record.Tests.push({
+        Test_ID: t.Test_ID || null,
+        Test_Name: t.Test_Name,
+        Group: t.Group || "",
+        Result_Value: t.Result_Value,
+        Reference_Range: t.Reference_Range || "",
+        Units: t.Units || "",
+        Remarks: t.Remarks || Diagnosis_Notes || "",
       });
     }
 
+  });
+}
+  
+console.log("Incoming Tests:", Tests);
+console.log("Existing Record Tests:", record?.Tests);
+
     await record.save();
+    // ===================================================
+    // LOG MEDICAL ACTION (NON-BLOCKING)
+    // ===================================================
+    try {
+      await MedicalAction.create({
+        employee_id: Employee_ID,
+        visit_id: req.body.visit_id || null, // optional
+        action_type: "DIAGNOSIS_TEST",
+        source: "LAB",
+        data: {
+          diagnosis_record_id: record._id,
+          tests: Tests
+        },
+        remarks: Diagnosis_Notes || ""
+      });
+    } catch (logErr) {
+      console.error("⚠️ MedicalAction log failed (diagnosis):", logErr.message);
+      // DO NOT throw error — diagnosis must succeed
+    }
 
     const historyEntry = {
       Date: new Date(),
@@ -105,34 +224,28 @@ diagnosisApp.post("/add", async (req, res) => {
 // ✅ Get all diagnosis records for a person
 diagnosisApp.get("/records/:personId", async (req, res) => {
   try {
-    console.log("Incoming ID:", req.params.personId);
-
     const { personId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(personId))
+    if (!mongoose.Types.ObjectId.isValid(personId)) {
       return res.status(400).json({ message: "Invalid ID" });
-
-    const personObjectId = new mongoose.Types.ObjectId(personId);
+    }
 
     const records = await DiagnosisRecord.find({
-      $or: [{ Employee: personObjectId }, { FamilyMember: personObjectId }]
+      Employee: personId
     })
-      .populate("Employee", "Name")
-      .populate("FamilyMember", "Name Relationship")
+      .populate("Employee", "Name ABS_NO Sex DOB")
+      .populate("FamilyMember", "Name Relationship Sex DOB")
       .populate("Institute", "Institute_Name")
+      .populate("Tests.Test_ID")   // 🔥 THIS IS THE FIX
       .sort({ createdAt: -1 });
 
-    if (!records.length)
-      return res.status(404).json({ message: "No records found" });
-
     res.status(200).json(records);
+
   } catch (err) {
-    console.error("Error fetching diagnosis records:", err);
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch records" });
   }
 });
-
-
 
 
 module.exports = diagnosisApp;

@@ -1,29 +1,15 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const indentApp = express.Router();
-
+const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const Institute = require("../models/master_institute");
-const Manufacturer = require("../models/master_manufacture");
 const Medicine = require("../models/master_medicine");
 
 /* ---------------------------------------------
-   GET ALL MANUFACTURERS
+   GENERATE INDENT DATA (SALES + BUFFER LOGIC)
 --------------------------------------------- */
-indentApp.get("/manufacturers", async (req, res) => {
+indentApp.get("/generate", async (req, res) => {
   try {
-    const manufacturers = await Manufacturer.find({}, "Manufacturer_Name");
-    res.json(manufacturers);
-  } catch (err) {
-    res.status(500).json({ message: "Failed to load manufacturers" });
-  }
-});
-
-/* ---------------------------------------------
-   GENERATE INDENT DATA (✅ CORRECT LOGIC)
---------------------------------------------- */
-indentApp.get("/generate/:manufacturerId", async (req, res) => {
-  try {
-    const { manufacturerId } = req.params;
     const { instituteId } = req.query;
 
     if (!mongoose.Types.ObjectId.isValid(instituteId)) {
@@ -34,35 +20,61 @@ indentApp.get("/generate/:manufacturerId", async (req, res) => {
     if (!institute) {
       return res.status(404).json({ message: "Institute not found" });
     }
+  const medicines = await Medicine.find({ Institute_ID: instituteId });
 
-    const medicines = await Medicine.find({
-      Manufacturer_ID: manufacturerId
-    });
 
+    /* ---------- INVENTORY ---------- */
     const inventoryMap = new Map(
-      (institute.Medicine_Inventory || []).map((item) => [
-        String(item.Medicine_ID),
-        item.Quantity
+      (institute.Medicine_Inventory || []).map(i => [
+        String(i.Medicine_ID),
+        i.Quantity
       ])
     );
 
-    const items = medicines.map((med) => {
-      const instituteStock = inventoryMap.get(String(med._id)) || 0;
+    // Calculate previous 1 year consumption for each medicine
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
 
-      const requiredQty = Math.max(
-        (med.Threshold_Qty || 0) - instituteStock,
-        0
-      );
+    const InstituteLedger = require("../models/InstituteLedger");
+
+    const items = await Promise.all(medicines.map(async med => {
+      const stockOnHand = med.Quantity || 0;
+
+      // Aggregate total consumption (OUT) for this medicine in the past year
+      const consumptionAgg = await InstituteLedger.aggregate([
+        {
+          $match: {
+            Institute_ID: mongoose.Types.ObjectId(instituteId),
+            Medicine_ID: med._id,
+            Direction: "OUT",
+            Timestamp: { $gte: oneYearAgo }
+          }
+        },
+        {
+          $group: {
+            _id: null,
+            totalConsumption: { $sum: "$Quantity" }
+          }
+        }
+      ]);
+
+      const prevYearConsumption = consumptionAgg.length > 0 ? consumptionAgg[0].totalConsumption : 0;
+      const bufferQty = prevYearConsumption + 0.1 * prevYearConsumption;
+      const requiredQty = Math.max(Math.round(bufferQty - stockOnHand), 0);
 
       return {
-        Medicine_ID: med._id,
         Medicine_Code: med.Medicine_Code,
         Medicine_Name: med.Medicine_Name,
-        Stock_On_Hand: instituteStock,        // ✅ FIXED
+        Type: med.Type,
+        Category: med.Category,
+        Stock_On_Hand: stockOnHand,
+        Previous_Year_Consumption: prevYearConsumption,
+        Buffer_Quantity: Math.round(bufferQty),
         Required_Quantity: requiredQty,
-        Remarks: requiredQty > 0 ? "Below threshold" : ""
+        Remarks: requiredQty > 0 ? "Below buffer stock" : "Sufficient stock"
       };
-    });
+    }));
+
 
     res.json({
       Institute_Name: institute.Institute_Name,
@@ -70,8 +82,9 @@ indentApp.get("/generate/:manufacturerId", async (req, res) => {
       Date: new Date(),
       Items: items
     });
+
   } catch (err) {
-    console.error("Indent generation failed:", err);
+    console.error(err);
     res.status(500).json({ message: "Failed to generate indent" });
   }
 });

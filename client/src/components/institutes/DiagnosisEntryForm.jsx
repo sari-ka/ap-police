@@ -1,14 +1,25 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import PatientSelector from "../institutes/PatientSelector";
+import { useNavigate } from "react-router-dom";
+import "bootstrap/dist/css/bootstrap.min.css";
 
 const DiagnosisEntryForm = () => {
-  const [employees, setEmployees] = useState([]);
-  const [familyMembers, setFamilyMembers] = useState([]);
   const [testsMaster, setTestsMaster] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filteredEmployees, setFilteredEmployees] = useState([]);
+  const [doctorDiagnosis, setDoctorDiagnosis] = useState([]);
+  // const [searchTerm, setSearchTerm] = useState("");
   const [instituteName, setInstituteName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [visitId, setVisitId] = useState(null);
+  const [familyMembers, setFamilyMembers] = useState([]);
+  const navigate = useNavigate();
+  const [selectedFamilyMember, setSelectedFamilyMember] = useState(null);
+const [selectedEmployee, setSelectedEmployee] = useState(null);
+const [pastRecords, setPastRecords] = useState([]);
+const [showHistory, setShowHistory] = useState(false);
+const [tokenNumber, setTokenNumber] = useState(null);
+
+
   const [formData, setFormData] = useState({
     Institute_ID: "",
     Employee_ID: "",
@@ -33,6 +44,63 @@ const DiagnosisEntryForm = () => {
   return `${day}-${month}-${year}`; // ✅ DD-MM-YYYY
 };
 
+const fetchDoctorDiagnosis = async (visitId) => {
+  try {
+    const res = await axios.get(
+      `http://localhost:${BACKEND_PORT_NO}/diagnosis-api/visit/${visitId}/doctor`
+    );
+
+    setDoctorDiagnosis(res.data ? [res.data] : []);
+  } catch (err) {
+    console.error("Failed to fetch doctor diagnosis", err);
+    setDoctorDiagnosis([]);
+  }
+};
+
+
+useEffect(() => {
+  if (doctorDiagnosis.length === 0) {
+    // reset to single empty row
+    setFormData(prev => ({
+      ...prev,
+      Tests: [{
+        Test_ID: "",
+        Test_Name: "",
+        Result_Value: "",
+        Reference_Range: "",
+        Units: ""
+      }]
+    }));
+    return;
+  }
+
+  // 🧠 get latest doctor prescription
+  const latestPrescription = doctorDiagnosis[0]; 
+
+  const latestTests = (latestPrescription.data?.tests || []).map(t => ({
+    Test_ID: t.Test_ID || "",
+    Test_Name: t.Test_Name || "",
+    Result_Value: "",
+    Reference_Range: t.Reference_Range || "",
+    Units: t.Units || "",
+    Remarks: ""
+  }));
+
+  setFormData(prev => ({
+    ...prev,
+    Tests: latestTests.length > 0 ? latestTests : [{
+      Test_ID: "",
+      Test_Name: "",
+      Result_Value: "",
+      Reference_Range: "",
+      Units: ""
+    }]
+  }));
+
+}, [doctorDiagnosis]);
+
+
+
   useEffect(() => {
     const localInstituteId = localStorage.getItem("instituteId");
     if (localInstituteId) {
@@ -42,7 +110,7 @@ const DiagnosisEntryForm = () => {
     } else {
       console.warn("No instituteId in localStorage");
     }
-    fetchEmployees();
+    // fetchEmployees();
   }, []);
 
   const fetchInstituteName = async (id) => {
@@ -54,132 +122,23 @@ const DiagnosisEntryForm = () => {
     }
   };
 
-  const fetchEmployees = async () => {
-    try {
-      const res = await axios.get(`http://localhost:${BACKEND_PORT_NO}/employee-api/all`);
-      const employeesData = res.data?.employees || res.data || [];
-      setEmployees(employeesData);
-      console.log("Employees fetched:", employeesData.length);
-    } catch (err) {
-      console.error("Error fetching employees:", err);
-      // Try alternative endpoint
-      try {
-        const altRes = await axios.get(`http://localhost:${BACKEND_PORT_NO}/employee-api/employees`);
-        setEmployees(altRes.data || []);
-      } catch (altErr) {
-        console.error("Alternative endpoint also failed:", altErr);
-      }
-    }
-  };
 
-  const fetchTests = async () => {
-    try {
-      const res = await axios.get(`http://localhost:${BACKEND_PORT_NO}/diagnosis-api/tests`);
-      setTestsMaster(res.data || []);
-      console.log("Tests fetched:", res.data?.length);
-    } catch (err) {
-      console.error("Error fetching tests:", err);
-    }
-  };
 
-  // Filter employees
-  useEffect(() => {
-    if (!searchTerm.trim()) return setFilteredEmployees([]);
-    const q = searchTerm.toLowerCase();
-    setFilteredEmployees(
-      employees.filter(e => 
-        String(e.ABS_NO || "").toLowerCase().startsWith(q) ||
-        String(e.Name || "").toLowerCase().includes(q)
-      )
+const fetchTests = async () => {
+  try {
+    const res = await axios.get(
+      `http://localhost:${BACKEND_PORT_NO}/diagnosis-api/tests`
     );
-  }, [searchTerm, employees]);
 
-  // Fetch family members - FIXED VERSION
-  useEffect(() => {
-    const fetchFamily = async () => {
-      if (!formData.Employee_ID) {
-        setFamilyMembers([]);
-        return;
-      }
-      
-      setLoading(true);
-      try {
-        console.log("Fetching family for employee ID:", formData.Employee_ID);
-        
-        // Method 1: Direct family API
-        const res = await axios.get(`http://localhost:${BACKEND_PORT_NO}/family-api/family/${formData.Employee_ID}`);
-        
-        console.log("Family API response:", res.data);
-        
-        if (res.data && res.data.length > 0) {
-          setFamilyMembers(res.data);
-        } else {
-          // Method 2: Try through employee endpoint
-          console.log("No direct family found, checking employee profile...");
-          const employeeRes = await axios.get(
-            `http://localhost:${BACKEND_PORT_NO}/employee-api/profile/${formData.Employee_ID}`
-          );
-          
-          if (employeeRes.data?.FamilyMembers && employeeRes.data.FamilyMembers.length > 0) {
-            // Fetch details for each family member
-            const familyDetails = await Promise.all(
-              employeeRes.data.FamilyMembers.map(async (memberId) => {
-                try {
-                  const memberRes = await axios.get(
-                    `http://localhost:${BACKEND_PORT_NO}/family-api/member/${memberId}`
-                  );
-                  return memberRes.data;
-                } catch (err) {
-                  console.error(`Error fetching family member ${memberId}:`, err);
-                  return null;
-                }
-              })
-            );
-            
-            const validMembers = familyDetails.filter(m => m !== null);
-            setFamilyMembers(validMembers);
-          } else {
-            setFamilyMembers([]);
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching family members:", err);
-        setFamilyMembers([]);
-        
-        // Try debug endpoint
-        try {
-          const debugRes = await axios.get(`http://localhost:${BACKEND_PORT_NO}/debug/family-data`);
-          console.log("Debug family data:", debugRes.data);
-        } catch (debugErr) {
-          console.error("Debug endpoint failed:", debugErr);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    if (formData.Employee_ID) {
-      fetchFamily();
-    } else {
-      setFamilyMembers([]);
-    }
-  }, [formData.Employee_ID]);
+    setTestsMaster(res.data || []);
+    console.log("Tests fetched:", res.data?.length);
+  } catch (err) {
+    console.error("Error fetching tests:", err);
+  }
+};
 
-  const handleEmployeeSelect = (emp) => {
-    console.log("Selected employee:", emp);
-    setFormData(prev => ({ ...prev, Employee_ID: emp._id }));
-    setSearchTerm(emp.ABS_NO || "");
-    setFilteredEmployees([]);
-  };
 
-  const handleCheckboxChange = (e) => {
-    const { name, checked } = e.target;
-    setFormData(prev => ({ 
-      ...prev, 
-      [name]: checked,
-      ...(name === "IsFamilyMember" && !checked ? { FamilyMember_ID: "" } : {})
-    }));
-  };
+
 
   const handleTestChange = (index, field, value) => {
     setFormData(prev => {
@@ -227,6 +186,7 @@ const DiagnosisEntryForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
     
     // Validation
     if (!formData.Institute_ID) {
@@ -257,395 +217,491 @@ const DiagnosisEntryForm = () => {
       }
     }
 
-    const payload = {
-      Institute_ID: formData.Institute_ID,
-      Employee_ID: formData.Employee_ID,
-      IsFamilyMember: formData.IsFamilyMember,
-      FamilyMember_ID: formData.IsFamilyMember ? formData.FamilyMember_ID : null,
-      Tests: formData.Tests.map(t => ({
-        Test_ID: t.Test_ID || null,
-        Test_Name: t.Test_Name,
-        Result_Value: t.Result_Value,
-        Reference_Range: t.Reference_Range || "",
-        Units: t.Units || "",
-        Remarks: t.Remarks || ""
-      })),
-      Diagnosis_Notes: formData.Diagnosis_Notes || ""
-    };
+    // const payload = {
+    //   Institute_ID: formData.Institute_ID,
+    //   Employee_ID: formData.Employee_ID,
+    //   IsFamilyMember: formData.IsFamilyMember,
+    //   FamilyMember_ID: formData.IsFamilyMember ? formData.FamilyMember_ID : null,
+    //   Tests: formData.Tests.map(t => ({
+    //     Test_ID: t.Test_ID || null,
+    //     Test_Name: t.Test_Name,
+    //     Result_Value: t.Result_Value,
+    //     Reference_Range: t.Reference_Range || "",
+    //     Units: t.Units || "",
+    //     Remarks: t.Remarks || ""
+    //   })),
+    //   Diagnosis_Notes: formData.Diagnosis_Notes || ""
+    // };
 
-    console.log("Submitting payload:", payload);
+    // console.log("Submitting payload:", payload);
 
     try {
-      const res = await axios.post(`http://localhost:${BACKEND_PORT_NO}/diagnosis-api/add`, payload);
-      alert("✅ Diagnosis record saved successfully!");
-      
-      // Reset form (keep institute ID)
-      setFormData(prev => ({ 
-        ...prev, 
-        Employee_ID: "", 
-        IsFamilyMember: false, 
-        FamilyMember_ID: "", 
-        Tests: [{ 
-          Test_ID: "", 
-          Test_Name: "", 
-          Result_Value: "", 
-          Reference_Range: "", 
-          Units: "" 
-        }], 
-        Diagnosis_Notes: "" 
-      }));
-      setSearchTerm("");
-      setFamilyMembers([]);
-    } catch (err) {
-      console.error("Error saving diagnosis:", err?.response?.data || err);
-      alert("❌ Error saving diagnosis: " + (err?.response?.data?.message || err?.message || "Server error"));
-    }
+      await axios.post(
+        `http://localhost:${BACKEND_PORT_NO}/diagnosis-api/add`,
+        {
+          Institute_ID: formData.Institute_ID,
+          Employee_ID: formData.Employee_ID,
+          IsFamilyMember: formData.IsFamilyMember,
+          FamilyMember_ID: formData.IsFamilyMember
+            ? formData.FamilyMember_ID
+            : null,
+          Tests: formData.Tests.map(t => ({
+            Test_ID: t.Test_ID,
+            Test_Name: t.Test_Name,
+            Result_Value: t.Result_Value,
+            Reference_Range: t.Reference_Range,
+            Units: t.Units
+          })),
+          Diagnosis_Notes: formData.Diagnosis_Notes,
+          visit_id: visitId
+        }
+      );
+        alert("✅ Diagnosis record saved successfully!");
+        
+        // Reset form (keep institute ID)
+        setFormData(prev => ({ 
+          ...prev,
+          Employee_ID: "",
+          Tests: [{
+            Test_ID: "",
+            Test_Name: "",
+            Result_Value: "",
+            Reference_Range: "",
+            Units: ""
+          }],
+          Diagnosis_Notes: ""
+        }));
+        // setSearchTerm("");
+        setFamilyMembers([]);
+        setVisitId(null);
+      } catch (err) {
+        console.error("Error saving diagnosis:", err?.response?.data || err);
+        alert("❌ Error saving diagnosis: " + (err?.response?.data?.message || err?.message || "Server error"));
+      }
+    };
+
+  const handlePrint = () => {
+    const section = document.getElementById("diagnosis-print-section");
+    if (!section) return;
+
+    const printWindow = window.open("", "_blank", "width=1000,height=800");
+    if (!printWindow) return;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Diagnosis / Lab Test Entry</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #ddd; padding: 8px; }
+            button { display: none !important; }
+          </style>
+        </head>
+        <body>${section.innerHTML}</body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 300);
   };
 
+const filteredDoctorDiagnosis = doctorDiagnosis.filter(d => {
+  const isFamily =
+    d.data?.is_family_member ??
+    d.data?.IsFamilyMember ??
+    false;
+
+  const familyId =
+    d.data?.family_member_id ??
+    d.data?.FamilyMember_ID ??
+    null;
+
+  // Employee self
+  if (!formData.IsFamilyMember) {
+    return isFamily === false;
+  }
+
+  // Family member
+  return isFamily === true && familyId === formData.FamilyMember_ID;
+});
+
+const fetchVisitDetails = async (visitId) => {
+  const res = await axios.get(
+    `http://localhost:${BACKEND_PORT_NO}/visit-api/visit/${visitId}`
+  );
+  return res.data;
+};
+const fetchPastRecords = async () => {
+  if (!formData.Employee_ID) return;
+
+  try {
+    const res = await axios.get(
+      `http://localhost:${BACKEND_PORT_NO}/diagnosis-api/records/${formData.Employee_ID}?isFamily=${formData.IsFamilyMember}&familyId=${formData.FamilyMember_ID}`
+    );
+
+    setPastRecords(res.data || []);
+    setShowHistory(true);   // 👈 open modal
+  } catch (err) {
+    console.error("Error fetching past records:", err);
+  }
+};
+
+
+
+
   return (
-    <div style={{ 
-      maxWidth: 800, 
-      margin: "40px auto", 
-      padding: 30, 
-      background: "#fff", 
-      borderRadius: 12, 
-      boxShadow: "0 4px 12px rgba(0,0,0,0.1)" 
-    }}>
-      <h2 style={{ textAlign: "center", marginBottom: 30, color: "#333" }}>🏥 Diagnosis / Lab Test Entry</h2>
-      
-      <form onSubmit={handleSubmit} autoComplete="off">
-        {/* Institute */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", marginBottom: 8, fontWeight: "bold", color: "#555" }}>Institute</label>
-          <input 
-            type="text" 
-            value={instituteName || "Loading..."} 
-            readOnly 
-            style={{ 
-              width: "100%", 
-              padding: "10px 12px", 
-              borderRadius: 8, 
-              border: "1px solid #ddd",
-              backgroundColor: "#f9f9f9" 
-            }} 
-          />
-        </div>
-
-        {/* Employee Search */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "block", marginBottom: 8, fontWeight: "bold", color: "#555" }}>Employee Search</label>
-          <input 
-            type="text" 
-            value={searchTerm} 
-            onChange={e => setSearchTerm(e.target.value)} 
-            placeholder="Type ABS_NO or Name..." 
-            style={{ 
-              width: "100%", 
-              padding: "10px 12px", 
-              borderRadius: 8, 
-              border: "1px solid #ddd" 
-            }} 
-          />
-          
-          {searchTerm && filteredEmployees.length > 0 && (
-            <div style={{ 
-              border: "1px solid #ddd", 
-              borderTop: "none",
-              maxHeight: 200, 
-              overflowY: "auto",
-              backgroundColor: "white",
-              borderRadius: "0 0 8px 8px",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.1)"
-            }}>
-              {filteredEmployees.map(emp => (
-                <div 
-                  key={emp._id} 
-                  onClick={() => handleEmployeeSelect(emp)}
-                  style={{ 
-                    padding: "10px 12px", 
-                    cursor: "pointer", 
-                    borderBottom: "1px solid #f0f0f0",
-                    transition: "background-color 0.2s"
-                  }}
-                  onMouseEnter={(e) => e.target.style.backgroundColor = "#f5f5f5"}
-                  onMouseLeave={(e) => e.target.style.backgroundColor = "white"}
+   
+       <div className="container-fluid mt-2">
+      {/* Back Button */}
+      <button
+        className="btn mb-3"
+        onClick={() => navigate(-1)}
+        style={{
+          backgroundColor: "#FFFFFF",
+          border: "1px solid #D6E0F0",
+          borderRadius: "8px",
+          padding: "6px 14px",
+          fontSize: "14px",
+          color: "#1F2933",
+        }}
+      >
+        ← Back
+      </button>
+      <div className="row justify-content-center">
+        {/* ================= HISTORY PANEL ================= */}
+        {showHistory && (
+          <div className="col-lg-4 mb-3">
+            <div className="card shadow border-0 h-100">
+              <div className="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <strong>📊 Test History</strong>
+                <button
+                  className="btn btn-sm btn-light"
+                  onClick={() => setShowHistory(false)}
                 >
-                  <div style={{ fontWeight: "bold" }}>{emp.ABS_NO}</div>
-                  <div style={{ color: "#666", fontSize: "13px" }}>{emp.Name}</div>
+                  ✕
+                </button>
+              </div>
+              <div
+                className="card-body"
+                style={{ maxHeight: "70vh", overflowY: "auto" }}
+              >
+                {!pastRecords || pastRecords.length === 0 ? (
+                  <div className="text-muted text-center py-4">
+                    📭 No previous records found.
+                  </div>
+                ) : (
+                  pastRecords.map((record, index) => (
+                    <div
+                      key={record._id || index}
+                      className="border-bottom pb-3 mb-3"
+                    >
+                      <div className="text-muted small mb-2">
+                        📅 Date: {record?.createdAt ? formatDateDMY(record.createdAt) : "—"}
+                      </div>
+                      {record?.Tests?.length > 0 ? (
+                        record.Tests.map((t, i) => (
+                          <div key={i} className="mb-2 p-2 bg-light rounded">
+                            <div className="fw-semibold text-dark">
+                              {t?.Test_Name || "Test"}
+                            </div>
+                            <small className="text-muted">
+                              Result: {t?.Result_Value || "N/A"}
+                              {t?.Units && ` ${t.Units}`}
+                            </small>
+                            {t?.Reference_Range && (
+                              <div className="small text-secondary mt-1">
+                                Ref Range: {t.Reference_Range}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-muted small">
+                          No test details available
+                        </div>
+                      )}
+                      {record?.Diagnosis_Notes && (
+                        <div className="mt-2 p-2 bg-light rounded small">
+                          📝 Notes: {record.Diagnosis_Notes}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= FORM ================= */}
+        <div
+          className={`mb-3 ${showHistory ? "col-lg-8" : "col-lg-10"}`}
+          style={{ transition: "all 0.4s ease" }}
+        >
+          <div className="card shadow border-0">
+            <div className="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+              <h5 className="mb-0">🏥 Diagnosis / Lab Test Entry</h5>
+              <button
+                type="button"
+                className="btn btn-outline-light btn-sm"
+                onClick={handlePrint}
+              >
+                🖨️ Print
+              </button>
+            </div>
+
+            <div className="card-body">
+              <form onSubmit={handleSubmit}>
+                {/* Institute */}
+                <div className="mb-4">
+                  <label className="form-label fw-semibold">🏥 Institute</label>
+                  <input
+                    className="form-control"
+                    value={instituteName || "Loading..."}
+                    readOnly
+                  />
                 </div>
-              ))}
-            </div>
-          )}
-          
-          {searchTerm && filteredEmployees.length === 0 && (
-            <div style={{ 
-              padding: "10px", 
-              color: "#888", 
-              fontStyle: "italic", 
-              fontSize: "13px",
-              backgroundColor: "#f9f9f9",
-              borderRadius: "0 0 8px 8px"
-            }}>
-              No employees found
-            </div>
-          )}
-        </div>
 
-        {/* Selected Employee Info */}
-        {formData.Employee_ID && (
-          <div style={{ 
-            marginBottom: 20, 
-            padding: "12px", 
-            backgroundColor: "#e8f5e9", 
-            borderRadius: "8px",
-            border: "1px solid #c8e6c9"
-          }}>
-            <div style={{ fontSize: "13px", color: "#2e7d32" }}>
-              <strong>Selected Employee:</strong> {
-                employees.find(e => e._id === formData.Employee_ID)?.Name || "Unknown"
-              } (ABS_NO: {
-                employees.find(e => e._id === formData.Employee_ID)?.ABS_NO || "N/A"
-              })
-            </div>
-          </div>
-        )}
+                {/* Patient Selector */}
+                <div className="mb-4">
+                  <PatientSelector
+                    instituteId={formData.Institute_ID}
+                    onlyDiagnosisQueue={true}
+                    onSelect={({ employee, visit }) => {
+                      console.log("VISIT OBJECT:", visit);
 
-        {/* Family Member Checkbox */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "flex", alignItems: "center", cursor: "pointer" }}>
-            <input 
-              type="checkbox" 
-              name="IsFamilyMember"
-              checked={formData.IsFamilyMember} 
-              onChange={handleCheckboxChange} 
-              style={{ marginRight: 10, transform: "scale(1.2)" }} 
-            /> 
-            <span style={{ fontWeight: "bold", color: "#555" }}>Diagnosis for Family Member?</span>
-          </label>
-        </div>
+                      const vId = visit?._id || null;
+                      const token = visit?.token_no || visit?.Token_Number || null;
+                      setVisitId(vId);
+                      setTokenNumber(token);
 
-        {/* Family Member Select */}
-        {formData.IsFamilyMember && (
-          <div style={{ marginBottom: 25 }}>
-            <label style={{ display: "block", marginBottom: 8, fontWeight: "bold", color: "#555" }}>Select Family Member</label>
-            <select 
-              value={formData.FamilyMember_ID} 
-              onChange={e => setFormData(prev => ({ ...prev, FamilyMember_ID: e.target.value }))} 
-              required={formData.IsFamilyMember}
-              disabled={loading}
-              style={{ 
-                width: "100%", 
-                padding: "10px 12px", 
-                borderRadius: 8, 
-                border: "1px solid #ddd",
-                backgroundColor: loading ? "#f5f5f5" : "white"
-              }}
-            >
-              <option value="">{loading ? "Loading family members..." : "Select Family Member"}</option>
-              {familyMembers.length === 0 && !loading && (
-                <option value="" disabled>No family members registered</option>
-              )}
-              {familyMembers.map(f => (
-                <option key={f._id} value={f._id}>
-                  {f.Name} ({f.Relationship || "Family"}) {f.DOB ? ` - DOB: ${formatDateDMY(new Date(f.DOB))}` : ""}
-                </option>
-              ))}
-            </select>
-            
-            {familyMembers.length === 0 && formData.Employee_ID && !loading && (
-              <div style={{ fontSize: "12px", color: "#666", marginTop: 6 }}>
-                This employee has no registered family members. Register family members first.
-              </div>
-            )}
-          </div>
-        )}
+                      setSelectedFamilyMember(
+                        visit?.IsFamilyMember ? visit.FamilyMember : null
+                      );
 
-        {/* Tests Section */}
-        <div style={{ marginBottom: 30 }}>
-          <h4 style={{ 
-            marginBottom: 20, 
-            color: "#333", 
-            borderBottom: "2px solid #eee", 
-            paddingBottom: 10 
-          }}>
-            Tests
-          </h4>
-          
-          {testsMaster.length === 0 ? (
-            <div style={{ 
-              padding: "15px", 
-              backgroundColor: "#fff8e1", 
-              borderRadius: "8px", 
-              border: "1px solid #ffecb3", 
-              marginBottom: 20 
-            }}>
-              <div style={{ color: "#ff6f00", fontWeight: "bold" }}>⚠️ No tests available</div>
-              <div style={{ fontSize: "13px", color: "#666", marginTop: 5 }}>
-                Add tests to the master list first.
-              </div>
-            </div>
-          ) : (
-            <>
-              {formData.Tests.map((t, i) => (
-                <div key={i} style={{ 
-                  marginBottom: 20, 
-                  padding: "15px", 
-                  backgroundColor: "#f8f9fa", 
-                  borderRadius: "8px",
-                  border: "1px solid #e9ecef"
-                }}>
-                  <div style={{ 
-                    display: "grid", 
-                    gridTemplateColumns: "1fr 1fr 1fr auto", 
-                    gap: "10px", 
-                    alignItems: "center" 
-                  }}>
-                    <div>
-                      <div style={{ fontSize: "12px", color: "#666", marginBottom: 4 }}>Test Selection</div>
-                      <select 
-                        value={t.Test_ID || ""} 
-                        onChange={e => handleTestChange(i, "Test_ID", e.target.value)} 
-                        style={{ 
-                          width: "100%", 
-                          padding: "8px 10px", 
-                          borderRadius: "6px", 
-                          border: "1px solid #ddd" 
-                        }}
-                      >
-                        <option value="">Select Test (or type below)</option>
-                        {testsMaster.map(tm => (
-                          <option key={tm._id} value={tm._id}>
-                            {tm.Test_Name} {tm.Group ? `(${tm.Group})` : ""}
-                          </option>
-                        ))}
-                      </select>
+                      setSelectedEmployee(employee);
+
+                      setFormData(prev => ({
+                        ...prev,
+                        Employee_ID: employee._id,
+                        IsFamilyMember: Boolean(visit?.IsFamilyMember),
+                        FamilyMember_ID: visit?.IsFamilyMember
+                          ? visit.FamilyMember?._id
+                          : ""
+                      }));
+
+                      // 🔥 THIS IS THE IMPORTANT PART
+                      if (vId) {
+                        fetchDoctorDiagnosis(vId);
+                      }
+                    }}
+                  />
+                </div>
+
+                {/* Selected Patient Info */}
+                {selectedEmployee && (
+                  <div className="alert alert-info mb-4">
+                    <div className="row">
+                      <div className="col-md-6">
+                        <strong>👨 Employee:</strong> {selectedEmployee.Name}
+                      </div>
+                      <div className="col-md-3">
+                        <strong>ID:</strong> {selectedEmployee.ABS_NO}
+                      </div>
+                      {tokenNumber && (
+                        <div className="col-md-3">
+                          <strong>🎫 Token:</strong> {tokenNumber}
+                        </div>
+                      )}
                     </div>
-                    
-                    <div>
-                      <div style={{ fontSize: "12px", color: "#666", marginBottom: 4 }}>Test Name</div>
-                      <input 
-                        type="text" 
-                        placeholder="Test Name" 
-                        value={t.Test_Name} 
-                        onChange={e => handleTestChange(i, "Test_Name", e.target.value)} 
-                        style={{ 
-                          width: "100%", 
-                          padding: "8px 10px", 
-                          borderRadius: "6px", 
-                          border: "1px solid #ddd" 
-                        }} 
-                      />
-                    </div>
-                    
-                    <div>
-                      <div style={{ fontSize: "12px", color: "#666", marginBottom: 4 }}>Result</div>
-                      <input 
-                        type="text" 
-                        placeholder="Result (e.g., 14.2)" 
-                        value={t.Result_Value} 
-                        onChange={e => handleTestChange(i, "Result_Value", e.target.value)} 
-                        style={{ 
-                          width: "100%", 
-                          padding: "8px 10px", 
-                          borderRadius: "6px", 
-                          border: "1px solid #ddd" 
-                        }} 
-                      />
-                    </div>
-                    
-                    {formData.Tests.length > 1 && (
-                      <div style={{ alignSelf: "flex-end" }}>
-                        <button 
-                          type="button" 
-                          onClick={() => removeTest(i)}
-                          style={{ 
-                            background: "#dc3545", 
-                            color: "#fff", 
-                            border: "none", 
-                            borderRadius: "6px", 
-                            padding: "8px 12px",
-                            cursor: "pointer"
-                          }}
-                        >
-                          Remove
-                        </button>
+                    {formData.IsFamilyMember && selectedFamilyMember && (
+                      <div className="row mt-2">
+                        <div className="col-md-6">
+                          <strong>👨‍👩‍👧 Family Member:</strong> {selectedFamilyMember.Name}
+                        </div>
+                        <div className="col-md-6">
+                          <strong>Relation:</strong> {selectedFamilyMember.Relationship}
+                        </div>
                       </div>
                     )}
-                  </div>
-                  
-                  {(t.Reference_Range || t.Units) && (
-                    <div style={{ 
-                      marginTop: 10, 
-                      padding: "8px", 
-                      backgroundColor: "#e7f3ff", 
-                      borderRadius: "4px",
-                      fontSize: "12px"
-                    }}>
-                      {t.Reference_Range && <span><strong>Ref Range:</strong> {t.Reference_Range} </span>}
-                      {t.Units && <span><strong>Units:</strong> {t.Units}</span>}
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        className="btn btn-outline-primary btn-sm"
+                        onClick={fetchPastRecords}
+                      >
+                        📄 View History
+                      </button>
                     </div>
+                  </div>
+                )}
+
+                {/* Doctor Diagnosis Reference */}
+                {filteredDoctorDiagnosis.length > 0 && (
+                  <div className="alert alert-warning mb-4">
+                    <h6 className="alert-heading">👨‍⚕️ Doctor Diagnosis (Reference)</h6>
+                    {filteredDoctorDiagnosis.map((d, i) => (
+                      <div key={i} className="mt-2">
+                        <ul className="mb-2">
+                          {d.data.tests.map((t, idx) => (
+                            <li key={idx}>{t.Test_Name}</li>
+                          ))}
+                        </ul>
+                        {d.data.notes && (
+                          <div className="small text-muted">
+                            Notes: {d.data.notes}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Tests Section */}
+                <div className="mb-4">
+                  <h6 className="fw-bold text-dark mb-3 border-bottom pb-2">
+                    🧪 Tests
+                  </h6>
+
+                  {testsMaster.length === 0 ? (
+                    <div className="alert alert-warning">
+                      <strong>⚠️ No tests available</strong>
+                      <div className="small mt-1">
+                        Add tests to the master list first.
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {formData.Tests.map((t, i) => (
+                        <div
+                          key={i}
+                          className="border rounded p-3 mb-3 bg-light"
+                        >
+                          <div className="d-flex justify-content-between align-items-center mb-3">
+                            <h6 className="mb-0">Test #{i + 1}</h6>
+                            {formData.Tests.length > 1 && (
+                              <button
+                                type="button"
+                                className="btn btn-outline-danger btn-sm"
+                                onClick={() => removeTest(i)}
+                              >
+                                🗑️ Remove
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="row g-3">
+                            <div className="col-md-6">
+                              <label className="form-label fw-semibold">Test Selection</label>
+                              <select
+                                className="form-select"
+                                value={t.Test_ID || ""}
+                                onChange={e => handleTestChange(i, "Test_ID", e.target.value)}
+                              >
+                                <option value="">Select Test (or type below)</option>
+                                {testsMaster.map(tm => (
+                                  <option key={tm._id} value={tm._id}>
+                                    {tm.Test_Name} {tm.Group ? `(${tm.Group})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="col-md-6">
+                              <label className="form-label fw-semibold">Test Name</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                placeholder="Test Name"
+                                value={t.Test_Name}
+                                onChange={e => handleTestChange(i, "Test_Name", e.target.value)}
+                              />
+                            </div>
+
+                            <div className="col-md-6">
+                              <label className="form-label fw-semibold">Result</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                placeholder="Result (e.g., 14.2)"
+                                value={t.Result_Value}
+                                onChange={e => handleTestChange(i, "Result_Value", e.target.value)}
+                              />
+                            </div>
+
+                            <div className="col-md-3">
+                              <label className="form-label fw-semibold">Reference Range</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                placeholder="Ref Range"
+                                value={t.Reference_Range}
+                                onChange={e => handleTestChange(i, "Reference_Range", e.target.value)}
+                              />
+                            </div>
+
+                            <div className="col-md-3">
+                              <label className="form-label fw-semibold">Units</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                placeholder="Units"
+                                value={t.Units}
+                                onChange={e => handleTestChange(i, "Units", e.target.value)}
+                              />
+                            </div>
+                          </div>
+
+                          {(t.Reference_Range || t.Units) && (
+                            <div className="mt-2 p-2 bg-info bg-opacity-10 rounded small">
+                              {t.Reference_Range && <span><strong>Ref Range:</strong> {t.Reference_Range} </span>}
+                              {t.Units && <span><strong>Units:</strong> {t.Units}</span>}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+
+                      <button
+                        type="button"
+                        className="btn btn-outline-success me-2"
+                        onClick={addTest}
+                      >
+                        ➕ Add Another Test
+                      </button>
+                    </>
                   )}
                 </div>
-              ))}
-              
-              <button 
-                type="button" 
-                onClick={addTest} 
-                style={{ 
-                  padding: "10px 16px", 
-                  background: "#007bff", 
-                  color: "#fff", 
-                  border: "none", 
-                  borderRadius: "6px",
-                  cursor: "pointer"
-                }}
-              >
-                + Add Another Test
-              </button>
-            </>
-          )}
-        </div>
 
-        {/* Diagnosis Notes */}
-        <div style={{ marginBottom: 30 }}>
-          <label style={{ display: "block", marginBottom: 8, fontWeight: "bold", color: "#555" }}>Diagnosis Notes</label>
-          <textarea 
-            value={formData.Diagnosis_Notes} 
-            onChange={e => setFormData(prev => ({ ...prev, Diagnosis_Notes: e.target.value }))} 
-            placeholder="Enter diagnosis notes, observations, or comments..."
-            rows={4} 
-            style={{ 
-              width: "100%", 
-              padding: "12px", 
-              borderRadius: "8px", 
-              border: "1px solid #ddd",
-              resize: "vertical" 
-            }} 
-          />
-        </div>
+                {/* Diagnosis Notes */}
+                <div className="mb-4">
+                  <label className="form-label fw-semibold">📝 Diagnosis Notes</label>
+                  <textarea
+                    className="form-control"
+                    rows={4}
+                    placeholder="Enter diagnosis notes, observations, or comments..."
+                    value={formData.Diagnosis_Notes}
+                    onChange={e => setFormData(prev => ({ ...prev, Diagnosis_Notes: e.target.value }))}
+                  />
+                </div>
 
-        {/* Submit Button */}
-        <button 
-          type="submit" 
-          style={{ 
-            marginTop: 10, 
-            width: "100%", 
-            padding: "14px", 
-            background: "#28a745", 
-            color: "white", 
-            border: "none", 
-            borderRadius: "8px",
-            fontSize: "16px",
-            fontWeight: "bold",
-            cursor: "pointer",
-            transition: "background-color 0.2s"
-          }}
-          onMouseEnter={(e) => e.target.style.backgroundColor = "#218838"}
-          onMouseLeave={(e) => e.target.style.backgroundColor = "#28a745"}
-        >
-          💾 Save Diagnosis Record
-        </button>
-      </form>
+                {/* Submit Button */}
+                <div className="text-center">
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-lg px-5"
+                  >
+                    💾 Save Diagnosis Record
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

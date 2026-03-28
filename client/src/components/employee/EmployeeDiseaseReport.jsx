@@ -67,18 +67,81 @@ const EmployeeDiseaseReport = () => {
     );
   }
 
-  return (
-    <div className="container mt-4">
-      <div className="card shadow">
-        <div className="card-header bg-dark text-white">
-          <h5 className="mb-0">Disease Report</h5>
-        </div>
+  const extractSymptomsFromNotes = (notes) => {
+  if (!notes) return [];
 
-        <div className="card-body">
-          {/* FILTERS */}
-          <div className="row g-2 mb-3">
+  const match = notes.match(/Symptoms\s*:\s*(.*)/i);
+  if (!match) return [];
+
+  // take only first line after Symptoms:
+  const line = match[1].split("\n")[0];
+
+  return line.split(",").map(s => s.trim()).filter(Boolean);
+};
+
+
+const cleanNotesWithoutSymptoms = (notes) => {
+  if (!notes) return "-";
+
+  // Remove the Symptoms line completely
+  const cleaned = notes.replace(/Symptoms\s*:\s*.*(\r?\n)?/i, "").trim();
+
+  return cleaned || "-";
+};
+
+
+  return (
+    <div
+      style={{
+        backgroundColor: "#F8FAFC",
+        minHeight: "100vh",
+        padding: "40px 0",
+        fontFamily: "'Inter', sans-serif",
+      }}
+    >
+      <div className="container">
+  
+        {/* BACK */}
+        <button
+          className="btn mb-4"
+          onClick={() => window.history.back()}
+          style={{
+            backgroundColor: "#FFFFFF",
+            border: "1px solid #D6E0F0",
+            borderRadius: "8px",
+            padding: "6px 14px",
+            fontSize: "14px",
+            color: "#1F2933",
+          }}
+        >
+          ← Back
+        </button>
+  
+        {/* PAGE HEADER */}
+        <div className="mb-4">
+          <h3 style={{ fontWeight: 600, color: "#1F2933" }}>
+            Disease History
+          </h3>
+          <p style={{ color: "#6B7280", marginBottom: 0 }}>
+            View chronic and recent disease records for you and your family
+          </p>
+        </div>
+  
+        {/* FILTER CARD */}
+        <div
+          className="mb-4"
+          style={{
+            backgroundColor: "#FFFFFF",
+            borderRadius: "14px",
+            border: "1px solid #D6E0F0",
+            padding: "20px",
+            boxShadow: "0 6px 14px rgba(0,0,0,0.06)",
+          }}
+        >
+          <div className="row g-3">
+  
             <div className="col-md-3">
-              <label className="form-label">Show</label>
+              <label className="form-label fw-semibold">Show</label>
               <select
                 className="form-select"
                 value={showType}
@@ -89,9 +152,11 @@ const EmployeeDiseaseReport = () => {
                 <option value="FAMILY">Family</option>
               </select>
             </div>
-
+  
             <div className="col-md-3">
-              <label className="form-label">Family Member</label>
+              <label className="form-label fw-semibold">
+                Family Member
+              </label>
               <select
                 className="form-select"
                 value={familyFilter}
@@ -105,15 +170,13 @@ const EmployeeDiseaseReport = () => {
                 ))}
               </select>
             </div>
-
+  
             <div className="col-md-3">
-              <label className="form-label">Category</label>
+              <label className="form-label fw-semibold">Category</label>
               <select
                 className="form-select"
                 value={categoryFilter}
-                onChange={(e) =>
-                  setCategoryFilter(e.target.value)
-                }
+                onChange={(e) => setCategoryFilter(e.target.value)}
               >
                 <option value="ALL">All</option>
                 <option value="Non-Communicable">
@@ -124,55 +187,126 @@ const EmployeeDiseaseReport = () => {
                 </option>
               </select>
             </div>
+  
           </div>
-
-          {/* TABLE */}
-          <div className="table-responsive">
-            <table className="table table-bordered table-hover align-middle">
-              <thead className="table-dark">
-                <tr>
-                  <th>Date</th>
-                  <th>Person</th>
-                  <th>Disease</th>
-                  <th>Category</th>
-                  <th>Severity</th>
-                  <th>Symptoms</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDiseases.length === 0 && (
+        </div>
+  
+        {/* TABLE CARD */}
+        <div
+          className="card border-0"
+          style={{
+            borderRadius: "16px",
+            boxShadow: "0 10px 24px rgba(0,0,0,0.08)",
+          }}
+        >
+          <div className="card-body">
+  
+            <div className="table-responsive">
+              <table
+                className="table align-middle"
+                style={{
+                  border: "1px solid #D6E0F0",
+                  borderRadius: "12px",
+                  overflow: "hidden",
+                }}
+              >
+                <thead
+                  style={{
+                    backgroundColor: "#F3F7FF",
+                    color: "#1F2933",
+                    fontWeight: 600,
+                  }}
+                >
                   <tr>
-                    <td colSpan="7" className="text-center">
-                      No disease records found
-                    </td>
+                    <th>Date</th>
+                    <th>Person</th>
+                    <th>Disease</th>
+                    <th>Category</th>
+                    <th>Severity</th>
+                    <th>Symptoms</th>
+                    <th>Notes</th>
                   </tr>
-                )}
-
-                {filteredDiseases.map((d, i) => (
-                  <tr key={i}>
-                    <td>
-                      {new Date(d.createdAt).toLocaleDateString()}
-                    </td>
-                    <td>
-                      {d.IsFamilyMember
-                        ? `${d.FamilyMember_ID?.Name} (${d.FamilyMember_ID?.Relationship})`
-                        : "Self"}
-                    </td>
-                    <td>{d.Disease_Name}</td>
-                    <td>{d.Category}</td>
-                    <td>{d.Severity_Level}</td>
-                    <td>{d.Symptoms.join(", ")}</td>
-                    <td>{d.Notes || "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+  
+                <tbody>
+                  {filteredDiseases.length === 0 && (
+                    <tr>
+                      <td colSpan="7" className="text-center text-muted">
+                        No disease records found
+                      </td>
+                    </tr>
+                  )}
+  
+                  {filteredDiseases.map((d, i) => (
+                    <tr
+                      key={i}
+                    >
+                      <td>
+                        {new Date(d.createdAt).toLocaleDateString()}
+                      </td>
+  
+                      <td>
+                        <span
+                          style={{
+                            padding: "4px 12px",
+                            borderRadius: "999px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            backgroundColor: d.IsFamilyMember
+                              ? "#FFF4E5"
+                              : "#EAF2FF",
+                            color: d.IsFamilyMember
+                              ? "#92400E"
+                              : "#1D4ED8",
+                          }}
+                        >
+                          {d.IsFamilyMember
+                            ? `${d.FamilyMember_ID?.Name} (${d.FamilyMember_ID?.Relationship})`
+                            : "Self"}
+                        </span>
+                      </td>
+  
+                      <td>{d.Disease_Name}</td>
+                      <td>{d.Category}</td>
+                      <td>
+                        <span
+                          style={{
+                            padding: "4px 10px",
+                            borderRadius: "999px",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            backgroundColor:
+                              d.Severity_Level === "Mild"
+                                ? "#D1FAE5"
+                                : d.Severity_Level === "Moderate"
+                                ? "#FEF08A"
+                                : d.Severity_Level === "Severe"
+                                ? "#FECACA"
+                                : "#DDD6FE",
+                            color: "#1F2933",
+                          }}
+                        >
+                          {d.Severity_Level}
+                        </span>
+                      </td>
+                      <td>
+                        {d.Symptoms.length > 0
+                          ? d.Symptoms.join(", ")
+                          : extractSymptomsFromNotes(d.Notes).join(", ") || "-"}
+                      </td>
+                      <td>{cleanNotesWithoutSymptoms(d.Notes)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+  
           </div>
         </div>
       </div>
     </div>
   );
+  
 };
 
 export default EmployeeDiseaseReport;

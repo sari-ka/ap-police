@@ -1,144 +1,183 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const prescriptionApp = express.Router();
-
+const { verifyToken, allowInstituteRoles } = require("./instituteAuth");
 const Prescription = require("../models/Prescription");
 const Institute = require("../models/master_institute");
 const Employee = require("../models/employee");
 const FamilyMember = require("../models/family_member");
-const Medicine = require("../models/master_medicine");
 const InstituteLedger = require("../models/InstituteLedger");
+const MedicalAction = require("../models/medical_action");
 
+// 🔴 IMPORTANT: THIS IS NOW SUBSTORE STOCK
+const Medicine = require("../models/master_medicine");
 
 // =======================================================
-// ADD PRESCRIPTION (EMPLOYEE / FAMILY)
+// DEBUG ENDPOINT - Check medicine structure
 // =======================================================
-prescriptionApp.post("/add", async (req, res) => {
-  console.log("📥 PRESCRIPTION PAYLOAD =", JSON.stringify(req.body, null, 2));
-
+prescriptionApp.get("/debug-medicines", async (req, res) => {
   try {
+    const medicines = await Medicine.find({}).limit(10);
+    
+    res.json({
+      totalMedicines: await Medicine.countDocuments(),
+      sampleMedicines: medicines.map(m => ({
+        _id: m._id,
+        Medicine_Code: m.Medicine_Code,
+        Medicine_Name: m.Medicine_Name,
+        Institute_ID: m.Institute_ID,
+        Quantity: m.Quantity,
+        allFields: Object.keys(m.toObject())
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =======================================================
+// ADD PRESCRIPTION (SUBSTORE → PATIENT) - FIXED VERSION
+// =======================================================
+prescriptionApp.post("/add",verifyToken,
+  allowInstituteRoles("pharmacist"), async (req, res) => {
+  try {
+    console.log("📦 PRESCRIPTION PAYLOAD:", JSON.stringify(req.body, null, 2));
+
     const {
       Institute_ID,
       Employee_ID,
-      IsFamilyMember = false,
-      FamilyMember_ID,
       Medicines,
+      visit_id,
+      IsFamilyMember,
+      FamilyMember_ID,
       Notes
     } = req.body;
 
+    // ================================
+    // BASIC VALIDATION
+    // ================================
     if (!Institute_ID || !Employee_ID || !Array.isArray(Medicines) || Medicines.length === 0) {
-      return res.status(400).json({ message: "Required fields missing" });
+      return res.status(400).json({ message: "Invalid prescription data" });
     }
 
     const institute = await Institute.findById(Institute_ID);
-    if (!institute)
-      return res.status(404).json({ message: "Institute not found" });
-
-    const employee = await Employee.findById(Employee_ID);
-    if (!employee)
-      return res.status(404).json({ message: "Employee not found" });
-
-    if (IsFamilyMember) {
-      const family = await FamilyMember.findById(FamilyMember_ID);
-      if (!family)
-        return res.status(404).json({ message: "Family member not found" });
+    if (!institute) {
+      return res.status(400).json({ message: "Institute not found" });
     }
 
-    // ===================================================
-    // INVENTORY DEDUCTION + LEDGER BUFFER
-    // ===================================================
-    const ledgerBuffer = [];
+    const ledgerEntries = [];
+    const prescriptionMedicines = [];
 
+    // ================================
+    // PROCESS EACH MEDICINE
+    // ================================
     for (const med of Medicines) {
 
-      const medId = String(
-        med.Medicine_ID || med.medicineId || ""
-      ).trim();
+      const Medicine_Code = med.Medicine_Code || med.Medicine_ID;
+      const Medicine_Name = (med.Medicine_Name || "").trim();
+      const qty = Number(med.Quantity);
 
-      const medName =
-        med.Medicine_Name || med.medicineName || "Unknown";
+      if (!Medicine_Code || qty <= 0) {
+        return res.status(400).json({ message: "Invalid medicine data" });
+      }
 
-      const qty = Number(
-        med.Quantity || med.quantity || 0
-      );
+      // 🔍 Find substore medicine for this institute
+      const substoreMed = await Medicine.findOne({
+        Medicine_Code: Medicine_Code,
+        Institute_ID: Institute_ID
+      });
 
-      if (!medId || qty <= 0) {
-        return res.status(400).json({
-          message: "Invalid medicine entry",
-          medicine: med
+      if (!substoreMed) {
+        return res.status(404).json({
+          message: `Medicine ${Medicine_Code} not found in Substore`
         });
       }
 
-      const invItem = institute.Medicine_Inventory.find(item =>
-        String(item.Medicine_ID) === medId ||
-        String(item.Medicine_ID?._id) === medId
-      );
+      console.log("📊 Stock Check:", {
+        Code: substoreMed.Medicine_Code,
+        Available: substoreMed.Quantity,
+        Requested: qty
+      });
 
-      if (!invItem) {
+      // ================================
+      // STOCK VALIDATION
+      // ================================
+      if (substoreMed.Quantity < qty) {
         return res.status(400).json({
-          message: `Medicine not found in inventory`,
-          medicineId: medId,
-          medicineName: medName
-        });
-      }
-
-      if (invItem.Quantity < qty) {
-        return res.status(400).json({
-          message: `Insufficient stock for ${medName}`,
-          available: invItem.Quantity,
+          message: "Insufficient stock",
+          medicineName: substoreMed.Medicine_Name,
+          available: substoreMed.Quantity,
           requested: qty
         });
       }
 
-      // Deduct stock
-      invItem.Quantity -= qty;
+      // 🔻 Deduct stock
+      substoreMed.Quantity -= qty;
+      await substoreMed.save();
 
-      const medDoc = await Medicine.findById(medId)
-        .populate("Manufacturer_ID", "Manufacturer_Name");
+      // ================================
+      // PREPARE PRESCRIPTION ENTRY
+      // ================================
+      prescriptionMedicines.push({
+        Medicine_ID: substoreMed._id,
+        Medicine_Name: substoreMed.Medicine_Name,
+        Quantity: qty
+      });
 
-      ledgerBuffer.push({
+      // ================================
+      // PREPARE LEDGER ENTRY
+      // ================================
+      ledgerEntries.push({
         Institute_ID,
         Transaction_Type: "PRESCRIPTION_ISSUE",
-        Reference_ID: null, // set after prescription save
-        Medicine_ID: medId,
-        Medicine_Name: medName,
-        Manufacturer_Name: medDoc?.Manufacturer_ID?.Manufacturer_Name || "",
-        Expiry_Date: medDoc?.Expiry_Date || null,
+        Reference_ID: visit_id || null,
+        Medicine_ID: substoreMed._id,
+        Medicine_Model: "Medicine",   // IMPORTANT
+        Medicine_Name: substoreMed.Medicine_Name,
+        Expiry_Date: substoreMed.Expiry_Date,
         Direction: "OUT",
         Quantity: qty,
-        Balance_After: invItem.Quantity
+        Balance_After: substoreMed.Quantity
       });
     }
 
-    await institute.save();
+    // ================================
+    // SAVE LEDGER
+    // ================================
+    if (ledgerEntries.length > 0) {
+      await InstituteLedger.insertMany(ledgerEntries);
+      console.log(`📚 ${ledgerEntries.length} ledger entries created`);
+    }
 
-    // ===================================================
-    // SAVE PRESCRIPTION
-    // ===================================================
-    const prescription = await Prescription.create({
+    // ================================
+    // CREATE PRESCRIPTION DOCUMENT
+    // ================================
+    const prescriptionDoc = new Prescription({
       Institute: Institute_ID,
       Employee: Employee_ID,
-      IsFamilyMember,
-      FamilyMember: IsFamilyMember ? FamilyMember_ID : null,
-      Medicines,
-      Notes
+      IsFamilyMember: IsFamilyMember || false,
+      FamilyMember: FamilyMember_ID || null,
+      Medicines: prescriptionMedicines,
+      Notes: Notes || "",
+      Timestamp: new Date()
     });
 
-    // Attach prescription id to ledger entries
-    ledgerBuffer.forEach(l => {
-      l.Reference_ID = prescription._id;
-    });
+    await prescriptionDoc.save();
 
-    await InstituteLedger.insertMany(ledgerBuffer);
+    console.log("✅ Prescription saved:", prescriptionDoc._id);
 
-    return res.status(201).json({
-      message: "Prescription saved & ledger updated",
-      prescriptionId: prescription._id
+    return res.status(200).json({
+      success: true,
+      message: "Prescription saved successfully",
+      prescriptionId: prescriptionDoc._id
     });
 
   } catch (err) {
-    console.error("Prescription error:", err);
-    return res.status(500).json({ error: err.message });
+    console.error("❌ PRESCRIPTION ERROR:", err);
+    return res.status(500).json({
+      message: "Failed to process prescription",
+      error: err.message
+    });
   }
 });
 
@@ -161,15 +200,16 @@ prescriptionApp.get("/employee/:employeeId", async (req, res) => {
     const familyIds = familyMembers.map(f => f._id);
 
     const prescriptions = await Prescription.find({
-      $or: [
-        { Employee: employeeId },
-        { FamilyMember: { $in: familyIds } }
-      ]
-    })
-      .populate("Institute", "Institute_Name")
-      .populate("Employee", "Name ABS_NO")
-      .populate("FamilyMember", "Name Relationship")
-      .sort({ Timestamp: -1 });
+  $or: [
+    { Employee: employeeId },
+    { FamilyMember: { $in: familyIds } }
+  ]
+})
+  .populate("Institute", "Institute_Name")
+  .populate("Employee", "Name ABS_NO")
+  .populate("FamilyMember", "Name Relationship")
+  .populate("Medicines.Medicine_ID", "Medicine_Code Expiry_Date")  // 🔥 ADD THIS
+  .sort({ Timestamp: -1 });
 
     return res.status(200).json(prescriptions);
 
@@ -224,4 +264,59 @@ prescriptionApp.get("/institute/:instituteId", async (req, res) => {
   }
 });
 
+// Add a debug endpoint to check specific medicine
+prescriptionApp.get("/debug-medicine/:code/:instituteId", async (req, res) => {
+  try {
+    const { code, instituteId } = req.params;
+    
+    const medicine = await Medicine.findOne({
+      Medicine_Code: code,
+      Institute_ID: instituteId
+    });
+    
+    if (!medicine) {
+      // Check if it exists without institute filter
+      const anyMedicine = await Medicine.findOne({
+        Medicine_Code: code
+      });
+      
+      return res.json({
+        found: false,
+        message: "Medicine not found for this institute",
+        medicineCode: code,
+        instituteId: instituteId,
+        existsWithoutInstitute: !!anyMedicine,
+        anyMedicine: anyMedicine
+      });
+    }
+    
+    res.json({
+      found: true,
+      medicine: {
+        _id: medicine._id,
+        Medicine_Code: medicine.Medicine_Code,
+        Medicine_Name: medicine.Medicine_Name,
+        Institute_ID: medicine.Institute_ID,
+        Quantity: medicine.Quantity
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const fetchInventory = async (id) => {
+  try {
+    const res = await axios.get(
+      `http://localhost:${BACKEND_PORT}/institute-api/inventory/${id}`
+    );
+    console.log("📦 INVENTORY API RESPONSE:", res.data[0]); // Check first item
+    console.log("Has _id field?", res.data[0]?._id ? "YES" : "NO");
+    setInventory(res.data || []);
+  } catch (error) {
+    console.error("Error fetching inventory:", error);
+    setInventory([]);
+  }
+};
 module.exports = prescriptionApp;
+

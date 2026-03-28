@@ -1,59 +1,8 @@
 ### get all institutes
 GET http://localhost:6100/institute-api/institutions
 
-
-
-
-###get all manufacturers
-GET http://localhost:6100/manufacturer-api/manufacturers
-
-###post a new manufacturer
-POST http://localhost:6100/manufacturer-api/register_manufacturer
-Content-Type: application/json
-
-{
-  "Manufacturer_Name": "TechForge Industries",
-  "Contact_No": "9876543210",
-  "Email_ID": "support@techforge.com",
-  "password": "Forge@123",
-  "Address": {
-    "Street": "Sector 9, Industrial Area",
-    "District": "Hyderabad",
-    "State": "Telangana",
-    "Pincode": "500072"
-  }
-}
-
-
-
-###get a manufacturer by name
-GET http://localhost:6100/manufacturer-api/manufacturer/name/pramo
-
-###delete a manufacturer by id
-DELETE http://localhost:6100/manufacturer-api/manufacturer_delete/1
-
-
-
-
-
-
-
-###get all medicines
+###
 GET http://localhost:6100/medicine-api/medicines
-
-###post a new medicine  
-post http://localhost:6100/medicine-api/medicine_add
-Content-Type: application/json
-
-{
-  "Medicine_Code": "MED1001",
-  "Manufacturer_ID": "6901b19036b4131de7c94527",
-  "Medicine_Name": "Paracetamol 500mg",
-  "Type": "Tablet",
-  "Category": "Pain Relief",
-  "Quantity": 500,
-  "Threshold_Qty": 100
-}
 
 
 ###get a medicine by name
@@ -65,3 +14,75 @@ DELETE http://localhost:6100/medicine-api/medicine_delete/1
 
 ###
 GET http://localhost:6100/family-api/family/673369fa1f1c7e63f4c5be21
+
+
+
+###
+POST http://localhost:6100/api/visits/register
+Content-Type: application/json
+
+{
+  "employee_id": "6954bd3cf03344f236e9008f"
+}
+
+###
+GET http://localhost:6100/api/visits/today
+
+###
+POST http://localhost:6100/api/medical-actions
+Content-Type: application/json
+
+{
+  "employee_id": "6954bd3cf03344f236e9008f",
+  "visit_id": null,
+  "action_type": "DOCTOR_PRESCRIPTION",
+  "source": "DOCTOR",
+  "data": { "dummy": true }
+}
+
+###
+POST http://localhost:6100/doctor-prescription-api/add
+Content-Type: application/json
+
+{
+  "Institute_ID": "6954b2d1ad2cbe33ee781de6",
+  "Employee_ID": "695608d568ee9b83741eb24f",
+  "IsFamilyMember": false,
+  "Medicines": [
+    {
+      "Medicine_Name": "Paracetamol",
+      "Dosage": "1-0-1",
+      "Duration": "5 days",
+      "Quantity": 10
+    }
+  ],
+  "Notes": "After food",
+  "visit_id": null
+}
+
+###
+POST http://localhost:6100/diagnosis-api/add
+Content-Type: application/json
+
+{
+  "Institute_ID": "6954bd3cf03344f236e9008f",
+  "Employee_ID": "6954bd3cf03344f236e9008f",
+  "IsFamilyMember": false,
+  "FamilyMember_ID": null,
+  "Tests": [
+    {
+      "Test_Name": "Blood Sugar",
+      "Result_Value": "120 mg/dL",
+      "Reference_Range": "70-140",
+      "Units": "mg/dL",
+      "Remarks": "Normal"
+    }
+  ],
+  "Diagnosis_Notes": "Routine check",
+  "visit_id": null
+}
+
+
+
+###
+http://localhost:6100/institute-api/analytics/696241bed5066b8df470b6b0
