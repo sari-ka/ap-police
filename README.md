@@ -41,19 +41,8 @@ The application supports different categories of users:
 
 ## Technology Stack
 
-| Component | Technology |
-|---|---|
-| Frontend | React.js |
-| Backend | Node.js, Express.js |
-| Database | MongoDB |
-| Database ODM | Mongoose |
-| API Communication | REST APIs, Axios |
-| Authentication | JSON Web Token (JWT) |
-| Password Hashing | bcryptjs |
-| File Uploads | Multer |
-| PDF Generation | jsPDF |
-| Styling | Bootstrap, Tailwind CSS |
-| Routing | React Router |
+<img width="762" height="607" alt="image" src="https://github.com/user-attachments/assets/7394389c-2587-41ea-8ea1-6004f1d1aeff" />
+
 
 ## System Architecture
 
